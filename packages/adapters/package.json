@@ -1,0 +1,10 @@
+{
+  "name": "@healthbridge/adapters",
+  "version": "3.0.0",
+  "description": "Healthcare format adapters (CSV, JSON, FHIR R4 JSON / NDJSON) for HealthBridge OS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@healthbridge/shared-types": "3.0.0", "@healthbridge/core": "3.0.0" },
+  "devDependencies": { "typescript": "^5.4.0" }
+}

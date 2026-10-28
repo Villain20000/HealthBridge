@@ -1,0 +1,10 @@
+{
+  "name": "@healthbridge/cli",
+  "version": "3.0.0",
+  "description": "Standalone CLI universal healthcare data tool for HealthBridge OS",
+  "main": "./dist/index.js",
+  "bin": { "healthbridge": "./dist/bin.js" },
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@healthbridge/sdk": "3.0.0" },
+  "devDependencies": { "typescript": "^5.4.0" }
+}

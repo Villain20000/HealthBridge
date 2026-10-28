@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
+  "references": [
+    { "path": "../shared-types" },
+    { "path": "../core" },
+    { "path": "../adapters" },
+    { "path": "../mapping-engine" },
+    { "path": "../transformation-engine" },
+    { "path": "../fhir-r4" },
+    { "path": "../validation" },
+    { "path": "../lineage-engine" },
+    { "path": "../trace-protocol" }
+  ],
+  "include": ["src/**/*"]
+}

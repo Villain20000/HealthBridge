@@ -1,0 +1,9 @@
+{
+  "name": "@healthbridge/web",
+  "version": "3.0.0",
+  "description": "Angular Web Studio & Visual Transformation Debugger for HealthBridge OS",
+  "private": true,
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@healthbridge/sdk": "3.0.0" },
+  "devDependencies": { "typescript": "^5.4.0" }
+}

@@ -1,0 +1,4 @@
+patient_id,first_name,last_name,gender,birth_date,ssn,city,state
+P101,John,Doe,male,1985-04-12,999-12-3456,Boston,MA
+P102,Jane,Smith,female,1990-11-23,999-65-4321,New York,NY
+P103,Robert,Johnson,M,1978-01-30,999-88-7766,Chicago,IL

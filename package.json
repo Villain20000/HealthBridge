@@ -1,0 +1,33 @@
+{
+  "name": "healthbridge-os",
+  "version": "3.0.0",
+  "description": "HealthBridge OS — Global Open-Source Medical Data Interoperability, Transformation and Debugging Platform",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "npx tsx --tsconfig tsconfig.base.json packages/sdk/src/test-sdk.ts",
+    "start:api": "node apps/api/dist/main.js",
+    "start:web": "node apps/web/dist/main.js",
+    "docker:demo": "docker compose -f docker/compose.demo.yaml up --build"
+  },
+  "keywords": [
+    "healthcare",
+    "fhir",
+    "interoperability",
+    "dicom",
+    "medical-data",
+    "transformation",
+    "debugger",
+    "hl7"
+  ],
+  "author": "HealthBridge OS Contributors",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0"
+  }
+}
