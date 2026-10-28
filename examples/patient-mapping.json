@@ -1,0 +1,17 @@
+{
+  "id": "patient-csv-mapping",
+  "name": "CSV Patient to FHIR R4 Patient Mapping",
+  "version": "1.0.0",
+  "sourceFormat": "csv",
+  "targetFormat": "fhir-r4",
+  "targetResourceType": "Patient",
+  "rules": [
+    { "id": "r1", "sourcePath": "patient_id", "targetPath": "id", "transform": "identity", "required": true },
+    { "id": "r2", "sourcePath": "first_name", "targetPath": "name.0.given.0", "transform": "trim" },
+    { "id": "r3", "sourcePath": "last_name", "targetPath": "name.0.family", "transform": "uppercase" },
+    { "id": "r4", "sourcePath": "gender", "targetPath": "gender", "transform": "format_gender_fhir" },
+    { "id": "r5", "sourcePath": "birth_date", "targetPath": "birthDate", "transform": "parse_date_iso" },
+    { "id": "r6", "sourcePath": "city", "targetPath": "address.0.city", "transform": "trim" },
+    { "id": "r7", "sourcePath": "state", "targetPath": "address.0.state", "transform": "uppercase" }
+  ]
+}

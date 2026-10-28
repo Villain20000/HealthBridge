@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "composite": true,
+    "incremental": true,
+    "baseUrl": ".",
+    "paths": {
+      "@healthbridge/shared-types": ["packages/shared-types/src/index.ts"],
+      "@healthbridge/trace-protocol": ["packages/trace-protocol/src/index.ts"],
+      "@healthbridge/core": ["packages/core/src/index.ts"],
+      "@healthbridge/adapters": ["packages/adapters/src/index.ts"],
+      "@healthbridge/mapping-engine": ["packages/mapping-engine/src/index.ts"],
+      "@healthbridge/transformation-engine": ["packages/transformation-engine/src/index.ts"],
+      "@healthbridge/fhir-r4": ["packages/fhir-r4/src/index.ts"],
+      "@healthbridge/validation": ["packages/validation/src/index.ts"],
+      "@healthbridge/lineage-engine": ["packages/lineage-engine/src/index.ts"],
+      "@healthbridge/sdk": ["packages/sdk/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "dist"]
+}

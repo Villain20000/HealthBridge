@@ -1,0 +1,10 @@
+{
+  "name": "@healthbridge/fhir-r4",
+  "version": "3.0.0",
+  "description": "FHIR R4 resource definitions and builders for HealthBridge OS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@healthbridge/shared-types": "3.0.0" },
+  "devDependencies": { "typescript": "^5.4.0" }
+}

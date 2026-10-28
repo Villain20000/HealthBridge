@@ -1,0 +1,17 @@
+{
+  "name": "@healthbridge/trace-protocol",
+  "version": "3.0.0",
+  "description": "Normalized transformation trace protocol and tracing engine for HealthBridge OS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@healthbridge/shared-types": "3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

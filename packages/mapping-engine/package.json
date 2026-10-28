@@ -1,0 +1,10 @@
+{
+  "name": "@healthbridge/mapping-engine",
+  "version": "3.0.0",
+  "description": "Safe, declarative schema mapping engine for HealthBridge OS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": { "build": "tsc -b" },
+  "dependencies": { "@healthbridge/shared-types": "3.0.0" },
+  "devDependencies": { "typescript": "^5.4.0" }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@healthbridge/core",
+  "version": "3.0.0",
+  "description": "Core architecture, Canonical Medical Data Envelope, and Adapter interfaces for HealthBridge OS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@healthbridge/shared-types": "3.0.0",
+    "@healthbridge/trace-protocol": "3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

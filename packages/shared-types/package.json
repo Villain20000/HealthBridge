@@ -1,0 +1,14 @@
+{
+  "name": "@healthbridge/shared-types",
+  "version": "3.0.0",
+  "description": "Shared TypeScript types and interfaces for HealthBridge OS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
