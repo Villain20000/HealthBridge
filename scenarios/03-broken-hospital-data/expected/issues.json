@@ -1,0 +1,6 @@
+{
+  "recordsProcessed": 4,
+  "recordsSucceeded": 2,
+  "recordsFailed": 2,
+  "codes": ["GENDER_CODE_UNMAPPED", "DUPLICATE_RESOURCE_ID", "INVALID_DATE_FORMAT"]
+}

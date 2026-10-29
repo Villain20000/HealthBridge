@@ -1,0 +1,103 @@
+{
+  "id": "lab-csv-to-fhir-observation",
+  "name": "Laboratory CSV to FHIR R4 Observation",
+  "version": "1.0.0",
+  "sourceFormat": "csv",
+  "targetFormat": "fhir-r4",
+  "targetResourceType": "Observation",
+  "sourceDomains": ["laboratory"],
+  "rules": [
+    {
+      "id": "r1",
+      "sourcePath": "accession",
+      "targetPath": "id",
+      "transform": "identity",
+      "required": true
+    },
+    {
+      "id": "r2",
+      "sourcePath": "__constant.resourceType",
+      "targetPath": "resourceType",
+      "transform": "default_value",
+      "defaultValue": "Observation"
+    },
+    {
+      "id": "r3",
+      "sourcePath": "status",
+      "targetPath": "status",
+      "transform": "identity"
+    },
+    {
+      "id": "r4",
+      "sourcePath": "loinc_code",
+      "targetPath": "code",
+      "transform": "codeable_concept",
+      "params": {
+        "system": "http://loinc.org",
+        "displayPath": "analyte",
+        "useCodeAsText": true
+      }
+    },
+    {
+      "id": "r5",
+      "sourcePath": "patient_id",
+      "targetPath": "subject",
+      "transform": "to_reference",
+      "params": {
+        "type": "Patient"
+      }
+    },
+    {
+      "id": "r6",
+      "sourcePath": "collected_at",
+      "targetPath": "effectiveDateTime",
+      "transform": "identity"
+    },
+    {
+      "id": "r7",
+      "sourcePath": "value",
+      "targetPath": "valueQuantity.value",
+      "transform": "string_to_number",
+      "params": {
+        "decimalSeparator": "."
+      }
+    },
+    {
+      "id": "r8",
+      "sourcePath": "unit",
+      "targetPath": "valueQuantity.unit",
+      "transform": "identity"
+    },
+    {
+      "id": "r9",
+      "sourcePath": "unit_ucum",
+      "targetPath": "valueQuantity.code",
+      "transform": "identity"
+    },
+    {
+      "id": "r10",
+      "sourcePath": "__constant.ucumSystem",
+      "targetPath": "valueQuantity.system",
+      "transform": "default_value",
+      "defaultValue": "http://unitsofmeasure.org"
+    },
+    {
+      "id": "r11",
+      "sourcePath": "ref_low",
+      "targetPath": "referenceRange.0.low.value",
+      "transform": "string_to_number"
+    },
+    {
+      "id": "r12",
+      "sourcePath": "ref_high",
+      "targetPath": "referenceRange.0.high.value",
+      "transform": "string_to_number"
+    },
+    {
+      "id": "r13",
+      "sourcePath": "unit",
+      "targetPath": "referenceRange.0.low.unit",
+      "transform": "identity"
+    }
+  ]
+}

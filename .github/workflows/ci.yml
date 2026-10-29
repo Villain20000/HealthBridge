@@ -1,0 +1,285 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancel superseded runs for the same PR/branch; pushes to main always finish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  mysql-integration:
+    name: MySQL ${{ matrix.mysql }} integration (live server)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ["8.0", "8.4"]
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: healthbridge_test
+        ports:
+          - 33061:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run migrations and repository tests against MySQL
+        env:
+          HEALTHBRIDGE_TEST_MYSQL_URL: mysql://root:root@127.0.0.1:33061/healthbridge_test
+        run: node scripts/run-tests.mjs "packages/persistence/test/mysql.integration.test.ts"
+
+      - name: End-to-end API smoke against MySQL
+        env:
+          SMOKE_MODE: mysql
+          SMOKE_DATABASE_URL: mysql://root:root@127.0.0.1:33061/healthbridge_test
+        run: bash scripts/smoke-api.sh
+
+  compose-smoke:
+    name: Compose stack smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start mysql + api + web
+        run: docker compose -f docker/compose.demo.yaml up -d --wait --wait-timeout 420
+
+      - name: Smoke the composed stack
+        run: bash scripts/smoke-compose.sh
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker/compose.demo.yaml logs --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/compose.demo.yaml down -v
+
+  build-and-test:
+    name: Node ${{ matrix.node }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Node 20 reached end-of-life on 2026-04-30; supported lines are 22 and 24.
+        node: [22, 24]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: Verify publishable tarballs (packaging gate)
+        run: node scripts/check-pack.mjs
+
+      - name: Unit and integration tests
+        run: npm test
+
+      - name: Build the Operator Console
+        run: npm run build:web
+
+      - name: Console unit tests (SSE parser, error mapping, proxy contract)
+        run: npm run test:web
+
+      - name: The browser bundle must not import Node-only modules (B5)
+        shell: bash
+        run: |
+          if grep -rlE "node:(fs|path|crypto|http|stream|net)" apps/web/dist/web/browser/*.js; then
+            echo "A Node-only module leaked into the browser bundle"; exit 1
+          fi
+          echo "browser bundle is free of node: imports"
+
+      - name: CLI smoke test (real commands, real exit codes)
+        shell: bash
+        run: |
+          node packages/cli/dist/bin.js doctor --json > doctor.json
+          node -e "const r=require('./doctor.json'); if (r.status !== 'healthy') { console.error(r); process.exit(1); }"
+          node packages/cli/dist/bin.js formats list --json > formats.json
+          node packages/cli/dist/bin.js transform datasets/synthetic-patients.csv --json > run.json
+          node -e "const r=require('./run.json'); if (r.status !== 'completed') process.exit(1); if (!Array.isArray(r.output[0].name)) process.exit(2);"
+          node packages/cli/dist/bin.js demo generate --profile broken-dates --seed 42 --records 5 --out demo.csv
+          test -s demo.csv
+
+      - name: Reproducibility (run bundle must replay byte-identical)
+        shell: bash
+        run: |
+          node packages/cli/dist/bin.js transform datasets/synthetic-patients.csv \
+            --mapping examples/patient-mapping.json \
+            --imported-at 2024-01-01T00:00:00.000Z \
+            --run-bundle run.bundle.json --out replay-a.json
+          node packages/cli/dist/bin.js reproduce run.bundle.json \
+            --input datasets/synthetic-patients.csv > reproduce.log
+          grep -q "Reproduced" reproduce.log
+          # a different payload must be refused, not silently accepted
+          set +e
+          node packages/cli/dist/bin.js reproduce run.bundle.json --input datasets/synthetic-labs.csv > /dev/null 2>&1
+          code=$?
+          set -e
+          test "$code" -eq 2
+
+      - name: Validation exit codes
+        shell: bash
+        run: |
+          node packages/cli/dist/bin.js transform datasets/synthetic-patients.csv \
+            --mapping examples/patient-mapping.json --out patients.out.json > /dev/null
+          set +e
+          echo '{"resourceType":"Patient","gender":"nope"}' > bad.json
+          node packages/cli/dist/bin.js validate bad.json > /dev/null
+          code=$?
+          set -e
+          test "$code" -eq 3
+
+      - name: Scenario lab (4 verified scenarios)
+        run: node scripts/run-tests.mjs "scenarios/*/*.test.ts"
+
+      - name: API smoke test (real process, real HTTP, demo mode)
+        shell: bash
+        run: bash scripts/smoke-api.sh
+
+      - name: SDK example
+        run: npx tsx examples/run-sdk-example.ts
+
+      - name: Verify no PHI-shaped data leaks into traces
+        shell: bash
+        run: |
+          node -e "
+          const fs=require('fs');
+          const run=JSON.parse(fs.readFileSync('run.json','utf8'));
+          const traces=JSON.stringify(run.traces);
+          if (traces.includes('123-45-6789') || traces.includes('999-')) {
+            console.error('PHI leak detected in traces'); process.exit(1);
+          }
+          console.log('trace redaction OK');
+          "
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    # Non-blocking until the known transitive advisories are remediated.
+    # TODO: drop `continue-on-error` and make this a required check once fixed.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm audit --omit=dev --audit-level=high
+
+  console-e2e:
+    name: Operator Console E2E (built API + console proxy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build API packages and the console
+        run: |
+          npm run build
+          npm run build:web
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright (seed data is created through the real API)
+        working-directory: apps/web
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
+  console-e2e-compose:
+    name: Operator Console E2E (Docker Compose stack)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build and start the composed stack
+        run: docker compose -f docker/compose.demo.yaml up -d --wait --wait-timeout 420
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright against the composed containers
+        working-directory: apps/web
+        env:
+          E2E_BASE_URL: http://127.0.0.1:4200
+          E2E_BOOTSTRAP_TOKEN: demo-bootstrap-token
+        run: npx playwright test
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose -f docker/compose.demo.yaml logs --tail 200
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-compose
+          path: apps/web/playwright-report
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/compose.demo.yaml down -v

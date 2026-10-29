@@ -1,0 +1,45 @@
+{
+  "name": "@healthbridge/fhir-r4",
+  "version": "3.2.0",
+  "description": "FHIR R4 resource definitions and builders for HealthBridge OS",
+  "keywords": [
+    "healthcare",
+    "fhir",
+    "fhir-r4",
+    "interoperability",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Villain20000/HealthBridge.git",
+    "directory": "packages/fhir-r4"
+  },
+  "homepage": "https://github.com/Villain20000/HealthBridge/tree/main/packages/fhir-r4#readme",
+  "bugs": {
+    "url": "https://github.com/Villain20000/HealthBridge/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "HealthBridge OS Contributors",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@healthbridge/shared-types": "3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

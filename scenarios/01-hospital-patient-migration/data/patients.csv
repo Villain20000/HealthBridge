@@ -1,0 +1,4 @@
+patient_id,family_name,given_name,sex,birth_date,mrn,city
+H001,Okonkwo,Chidi,female,1990-02-17,MRN-1001,Lagos
+H002,Silva,Ana,M,1985-11-03,MRN-1002,Sao Paulo
+H003,Chen,Wei,female,1978-06-30,MRN-1003,Taipei

@@ -1,0 +1,4 @@
+accession,patient_id,loinc_code,analyte,value,unit,unit_ucum,ref_low,ref_high,status,collected_at
+A-9001,P100,2345-7,Glucose,5.4,mmol/L,mmol/L,3.9,5.5,final,2024-03-01
+A-9002,P101,718-7,Hemoglobin,11.2,g/dL,g/dL,12.0,16.0,final,2024-03-01
+A-9003,P102,2951-2,Sodium,142,mmol/L,mmol/L,135,145,corrected,2024-03-02

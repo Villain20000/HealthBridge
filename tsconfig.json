@@ -1,0 +1,53 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/shared-types"
+    },
+    {
+      "path": "./packages/trace-protocol"
+    },
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/adapters"
+    },
+    {
+      "path": "./packages/mapping-engine"
+    },
+    {
+      "path": "./packages/target-builders"
+    },
+    {
+      "path": "./packages/transformation-engine"
+    },
+    {
+      "path": "./packages/fhir-r4"
+    },
+    {
+      "path": "./packages/validation"
+    },
+    {
+      "path": "./packages/lineage-engine"
+    },
+    {
+      "path": "./packages/auth"
+    },
+    {
+      "path": "./packages/storage"
+    },
+    {
+      "path": "./packages/persistence"
+    },
+    {
+      "path": "./packages/sdk"
+    },
+    {
+      "path": "./packages/cli"
+    },
+    {
+      "path": "./apps/api"
+    }
+  ]
+}

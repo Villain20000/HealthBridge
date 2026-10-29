@@ -1,0 +1,56 @@
+[
+  {
+    "id": "H001",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Okonkwo",
+        "given": ["Chidi"]
+      }
+    ],
+    "gender": "female",
+    "birthDate": "1990-02-17",
+    "identifier": [
+      {
+        "value": "MRN-1001",
+        "system": "urn:healthbridge:local-mrn"
+      }
+    ]
+  },
+  {
+    "id": "H002",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Silva",
+        "given": ["Ana"]
+      }
+    ],
+    "gender": "male",
+    "birthDate": "1985-11-03",
+    "identifier": [
+      {
+        "value": "MRN-1002",
+        "system": "urn:healthbridge:local-mrn"
+      }
+    ]
+  },
+  {
+    "id": "H003",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Chen",
+        "given": ["Wei"]
+      }
+    ],
+    "gender": "female",
+    "birthDate": "1978-06-30",
+    "identifier": [
+      {
+        "value": "MRN-1003",
+        "system": "urn:healthbridge:local-mrn"
+      }
+    ]
+  }
+]

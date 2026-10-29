@@ -1,0 +1,4 @@
+patient_id;familienname;vorname;geschlecht;geburtsdatum;gewicht_kg
+I001;Müller;Jürgen;w;17.02.1990;72,5
+I002;Ñúñez;Ana María;m;03.11.1985;80,1
+I003;李;伟;w;30.06.1978;55,0

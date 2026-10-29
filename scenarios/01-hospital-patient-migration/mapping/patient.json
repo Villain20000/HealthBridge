@@ -1,0 +1,62 @@
+{
+  "id": "hospital-patient-to-fhir",
+  "name": "Hospital CSV Patient to FHIR R4 Patient",
+  "version": "1.0.0",
+  "sourceFormat": "csv",
+  "targetFormat": "fhir-r4",
+  "targetResourceType": "Patient",
+  "sourceDomains": ["clinical"],
+  "rules": [
+    {
+      "id": "r1",
+      "sourcePath": "patient_id",
+      "targetPath": "id",
+      "transform": "identity",
+      "required": true
+    },
+    {
+      "id": "r2",
+      "sourcePath": "__constant.resourceType",
+      "targetPath": "resourceType",
+      "transform": "default_value",
+      "defaultValue": "Patient"
+    },
+    {
+      "id": "r3",
+      "sourcePath": "family_name",
+      "targetPath": "name.0.family",
+      "transform": "identity"
+    },
+    {
+      "id": "r4",
+      "sourcePath": "given_name",
+      "targetPath": "name.0.given.0",
+      "transform": "trim"
+    },
+    {
+      "id": "r5",
+      "sourcePath": "sex",
+      "targetPath": "gender",
+      "transform": "format_gender_fhir"
+    },
+    {
+      "id": "r6",
+      "sourcePath": "birth_date",
+      "targetPath": "birthDate",
+      "transform": "parse_date_iso"
+    },
+    {
+      "id": "r7",
+      "sourcePath": "mrn",
+      "targetPath": "identifier.0.value",
+      "transform": "identity"
+    },
+    {
+      "id": "r8",
+      "sourcePath": "__constant.mrnSystem",
+      "targetPath": "identifier.0.system",
+      "transform": "default_value",
+      "defaultValue": "urn:healthbridge:local-mrn"
+    }
+  ]
+}

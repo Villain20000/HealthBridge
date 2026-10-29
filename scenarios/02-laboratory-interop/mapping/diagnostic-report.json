@@ -1,0 +1,57 @@
+{
+  "id": "lab-csv-to-fhir-diagnostic-report",
+  "name": "Laboratory CSV to FHIR R4 DiagnosticReport",
+  "version": "1.0.0",
+  "sourceFormat": "csv",
+  "targetFormat": "fhir-r4",
+  "targetResourceType": "DiagnosticReport",
+  "sourceDomains": ["laboratory"],
+  "rules": [
+    {
+      "id": "r1",
+      "sourcePath": "accession",
+      "targetPath": "id",
+      "transform": "identity",
+      "required": true
+    },
+    {
+      "id": "r2",
+      "sourcePath": "__constant.resourceType",
+      "targetPath": "resourceType",
+      "transform": "default_value",
+      "defaultValue": "DiagnosticReport"
+    },
+    {
+      "id": "r3",
+      "sourcePath": "status",
+      "targetPath": "status",
+      "transform": "identity"
+    },
+    {
+      "id": "r4",
+      "sourcePath": "loinc_code",
+      "targetPath": "code",
+      "transform": "codeable_concept",
+      "params": {
+        "system": "http://loinc.org",
+        "displayPath": "analyte",
+        "useCodeAsText": true
+      }
+    },
+    {
+      "id": "r5",
+      "sourcePath": "patient_id",
+      "targetPath": "subject",
+      "transform": "to_reference",
+      "params": {
+        "type": "Patient"
+      }
+    },
+    {
+      "id": "r6",
+      "sourcePath": "collected_at",
+      "targetPath": "effectiveDateTime",
+      "transform": "identity"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "id": "patient-csv-mapping",
+  "name": "CSV Patient to FHIR R4 Patient Mapping",
+  "version": "1.1.0",
+  "sourceFormat": "csv",
+  "targetFormat": "fhir-r4",
+  "targetResourceType": "Patient",
+  "rules": [
+    {
+      "id": "r1",
+      "sourcePath": "patient_id",
+      "targetPath": "id",
+      "transform": "identity",
+      "required": true
+    },
+    {
+      "id": "r0",
+      "sourcePath": "__constant_resourceType",
+      "targetPath": "resourceType",
+      "transform": "default_value",
+      "defaultValue": "Patient",
+      "description": "Target-format constant; the source has no resourceType column"
+    },
+    {
+      "id": "r2",
+      "sourcePath": "first_name",
+      "targetPath": "name.0.given.0",
+      "transform": "trim"
+    },
+    {
+      "id": "r3",
+      "sourcePath": "last_name",
+      "targetPath": "name.0.family",
+      "transform": "uppercase"
+    },
+    {
+      "id": "r4",
+      "sourcePath": "gender",
+      "targetPath": "gender",
+      "transform": "format_gender_fhir"
+    },
+    {
+      "id": "r5",
+      "sourcePath": "birth_date",
+      "targetPath": "birthDate",
+      "transform": "parse_date_iso"
+    },
+    {
+      "id": "r6",
+      "sourcePath": "city",
+      "targetPath": "address.0.city",
+      "transform": "trim"
+    },
+    {
+      "id": "r7",
+      "sourcePath": "state",
+      "targetPath": "address.0.state",
+      "transform": "uppercase"
+    }
+  ],
+  "description": "Canonical CSV \u03b2\u2020\u2019 FHIR R4 Patient mapping used by the CLI and SDK examples.",
+  "sourceDomains": ["clinical"]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "@healthbridge/storage",
+  "version": "3.2.0",
+  "description": "Content-addressed object storage drivers (local filesystem, memory) for HealthBridge OS",
+  "keywords": [
+    "healthcare",
+    "storage",
+    "content-addressed",
+    "medical-data",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Villain20000/HealthBridge.git",
+    "directory": "packages/storage"
+  },
+  "homepage": "https://github.com/Villain20000/HealthBridge/tree/main/packages/storage#readme",
+  "bugs": {
+    "url": "https://github.com/Villain20000/HealthBridge/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "HealthBridge OS Contributors",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@healthbridge/shared-types": "3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

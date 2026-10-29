@@ -1,0 +1,5 @@
+patient_id,family_name,given_name,sex,birth_date,mrn
+B001,Duval,Marie,Z,1980-01-15,MRN-1
+B002,,Jean,male,not a date,MRN-2
+B001,Duval,Marie,female,1980-01-15,MRN-1
+B003,Nakamura,Ken,male,1990-02-30,MRN-3

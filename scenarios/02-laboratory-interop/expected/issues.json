@@ -1,0 +1,16 @@
+{
+  "observation": {
+    "counts": {
+      "error": 0,
+      "warning": 0
+    },
+    "codes": []
+  },
+  "diagnosticReport": {
+    "counts": {
+      "error": 0,
+      "warning": 1
+    },
+    "codes": ["LOW_MAPPING_COVERAGE"]
+  }
+}

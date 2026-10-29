@@ -1,0 +1,45 @@
+{
+  "name": "@healthbridge/target-builders",
+  "version": "3.2.0",
+  "description": "Target-format resource builders that enforce required elements before export",
+  "keywords": [
+    "healthcare",
+    "fhir",
+    "resource-builders",
+    "interoperability",
+    "medical-data"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Villain20000/HealthBridge.git",
+    "directory": "packages/target-builders"
+  },
+  "homepage": "https://github.com/Villain20000/HealthBridge/tree/main/packages/target-builders#readme",
+  "bugs": {
+    "url": "https://github.com/Villain20000/HealthBridge/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "HealthBridge OS Contributors",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@healthbridge/shared-types": "3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

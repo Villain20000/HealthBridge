@@ -1,0 +1,70 @@
+name: healthbridge-demo
+
+services:
+  mysql:
+    image: mysql:8.4
+    # MySQL 8.4 removed --default-authentication-plugin (caching_sha2 is the default
+    # now); passing it aborts startup with "unknown variable". Collation is pinned to
+    # the one the schema is written for.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    environment:
+      MYSQL_DATABASE: healthbridge
+      MYSQL_USER: healthbridge
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-healthbridge-demo}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-healthbridge-root}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      # Bound to loopback: the console reaches the API over the compose network, so the API
+      # does not need to be exposed to the LAN. Override the port when 3000 is taken
+      # (the smoke script reads SMOKE_COMPOSE_API).
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: mysql://healthbridge:${MYSQL_PASSWORD:-healthbridge-demo}@mysql:3306/healthbridge
+      # Override these for anything beyond a local demo.
+      HEALTHBRIDGE_KEY_PEPPER: ${HEALTHBRIDGE_KEY_PEPPER:-demo-pepper-change-me-please}
+      HEALTHBRIDGE_BOOTSTRAP_TOKEN: ${HEALTHBRIDGE_BOOTSTRAP_TOKEN:-demo-bootstrap-token}
+      HEALTHBRIDGE_STORAGE_DIR: /data/objects
+      HEALTHBRIDGE_CORS_ORIGINS: http://localhost:4200
+    volumes:
+      - object-data:/data/objects
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "${WEB_PORT:-4200}:4200"
+    environment:
+      PORT: 4200
+      # The web container proxies /api/* here, so the page and the API share one origin.
+      API_ORIGIN: http://api:3000
+      # 0 = no proxy timeout: SSE connections stay open until the run settles.
+      PROXY_TIMEOUT_MS: 0
+      # Set to 1 when TLS terminates in front of this container (enables HSTS).
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  object-data:

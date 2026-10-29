@@ -1,0 +1,29 @@
+{
+  "name": "@healthbridge/api",
+  "version": "3.2.0",
+  "description": "NestJS REST API for HealthBridge OS",
+  "private": true,
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/main.js",
+    "dev": "node --import tsx src/main.ts"
+  },
+  "dependencies": {
+    "@healthbridge/sdk": "3.2.0",
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/platform-express": "^10.3.0",
+    "express": "^4.19.2",
+    "reflect-metadata": "^0.2.1",
+    "rxjs": "^7.8.1",
+    "@healthbridge/auth": "3.2.0",
+    "@healthbridge/persistence": "3.2.0",
+    "@healthbridge/storage": "3.2.0",
+    "@healthbridge/shared-types": "3.2.0",
+    "@healthbridge/mapping-engine": "3.2.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "typescript": "^5.4.0"
+  }
+}

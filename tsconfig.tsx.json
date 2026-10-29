@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "composite": false,
+    "incremental": false,
+    "noEmit": true
+  },
+  "include": ["packages/*/src/**/*", "apps/*/src/**/*", "apps/api/test/**/*", "scenarios/**/*.ts", "examples/**/*.ts"]
+}

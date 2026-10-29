@@ -1,0 +1,35 @@
+node_modules/
+dist/
+*.tsbuildinfo
+*.log
+coverage/
+.DS_Store
+.env
+
+# verification scratch
+.verify/
+
+# Operator Console build and test artifacts
+apps/web/.angular/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/e2e/.state.json
+apps/web/e2e/.objects/
+
+# Local object storage (may contain PHI; never commit)
+.data/
+
+# Local scratch / working files
+.scratch/
+tmp-*
+.run.json
+*.tgz
+*.tmp
+
+# Environment files (keep the committed example)
+.env.*
+!.env.example
+
+# Editor settings
+.idea/
+/.vscode/

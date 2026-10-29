@@ -1,0 +1,67 @@
+{
+  "name": "healthbridge-os",
+  "version": "3.2.0",
+  "description": "HealthBridge OS — Global Open-Source Medical Data Interoperability, Transformation and Debugging Platform",
+  "private": true,
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "node scripts/run-tests.mjs",
+    "start:api": "node apps/api/dist/main.js",
+    "start:web": "node apps/web/server.mjs",
+    "docker:demo": "docker compose -f docker/compose.demo.yaml up --build",
+    "test:sdk": "tsx examples/run-sdk-example.ts",
+    "clean": "tsc -b --clean && rm -rf packages/*/dist apps/*/dist",
+    "test:api:smoke": "bash scripts/smoke-api.sh",
+    "test:mysql": "node scripts/run-tests.mjs \"packages/persistence/test/mysql.integration.test.ts\"",
+    "build:web": "npm run build --workspace @healthbridge/web",
+    "dev:web": "npm run start --workspace @healthbridge/web",
+    "test:web": "node scripts/run-tests.mjs \"apps/web/test/*.test.ts\"",
+    "test:e2e": "playwright test --config apps/web/playwright.config.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:pack": "node scripts/check-pack.mjs"
+  },
+  "keywords": [
+    "healthcare",
+    "fhir",
+    "interoperability",
+    "dicom",
+    "medical-data",
+    "transformation",
+    "debugger",
+    "hl7"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Villain20000/HealthBridge.git"
+  },
+  "homepage": "https://github.com/Villain20000/HealthBridge#readme",
+  "bugs": {
+    "url": "https://github.com/Villain20000/HealthBridge/issues"
+  },
+  "author": "HealthBridge OS Contributors",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.0.0",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.20.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.72.1",
+    "yaml": "^2.8.0"
+  }
+}

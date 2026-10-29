@@ -1,0 +1,36 @@
+[
+  {
+    "id": "B001",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Duval",
+        "given": ["Marie"]
+      }
+    ],
+    "gender": "unknown",
+    "birthDate": "1980-01-15",
+    "identifier": [
+      {
+        "value": "MRN-1"
+      }
+    ]
+  },
+  {
+    "id": "B001",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Duval",
+        "given": ["Marie"]
+      }
+    ],
+    "gender": "female",
+    "birthDate": "1980-01-15",
+    "identifier": [
+      {
+        "value": "MRN-1"
+      }
+    ]
+  }
+]

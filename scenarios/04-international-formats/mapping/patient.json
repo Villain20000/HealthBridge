@@ -1,0 +1,76 @@
+{
+  "id": "intl-patient-to-fhir",
+  "name": "International CSV (semicolon, DD.MM.YYYY, decimal comma) to FHIR R4 Patient",
+  "version": "1.0.0",
+  "sourceFormat": "csv",
+  "targetFormat": "fhir-r4",
+  "targetResourceType": "Patient",
+  "sourceDomains": ["clinical"],
+  "rules": [
+    {
+      "id": "r1",
+      "sourcePath": "patient_id",
+      "targetPath": "id",
+      "transform": "identity",
+      "required": true
+    },
+    {
+      "id": "r2",
+      "sourcePath": "__constant.resourceType",
+      "targetPath": "resourceType",
+      "transform": "default_value",
+      "defaultValue": "Patient"
+    },
+    {
+      "id": "r3",
+      "sourcePath": "familienname",
+      "targetPath": "name.0.family",
+      "transform": "identity"
+    },
+    {
+      "id": "r4",
+      "sourcePath": "vorname",
+      "targetPath": "name.0.given.0",
+      "transform": "identity"
+    },
+    {
+      "id": "r5",
+      "sourcePath": "geschlecht",
+      "targetPath": "gender",
+      "transform": "format_gender_fhir",
+      "params": {
+        "codes": {
+          "w": "female",
+          "m": "male",
+          "d": "other",
+          "x": "unknown"
+        }
+      }
+    },
+    {
+      "id": "r6",
+      "sourcePath": "geburtsdatum",
+      "targetPath": "birthDate",
+      "transform": "parse_date_iso",
+      "params": {
+        "inputFormat": "DD.MM.YYYY"
+      }
+    },
+    {
+      "id": "r7",
+      "sourcePath": "__constant.weightUrl",
+      "targetPath": "extension.0.url",
+      "transform": "default_value",
+      "defaultValue": "https://healthbridge.dev/fhir/StructureDefinition/source-weight-kg"
+    },
+    {
+      "id": "r8",
+      "sourcePath": "gewicht_kg",
+      "targetPath": "extension.0.valueDecimal",
+      "transform": "string_to_number",
+      "params": {
+        "decimalSeparator": ","
+      }
+    }
+  ]
+}

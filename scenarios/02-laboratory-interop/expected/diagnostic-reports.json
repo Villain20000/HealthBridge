@@ -1,0 +1,59 @@
+[
+  {
+    "id": "A-9001",
+    "resourceType": "DiagnosticReport",
+    "status": "final",
+    "code": {
+      "coding": [
+        {
+          "system": "http://loinc.org",
+          "code": "2345-7",
+          "display": "Glucose"
+        }
+      ],
+      "text": "Glucose"
+    },
+    "subject": {
+      "reference": "Patient/P100"
+    },
+    "effectiveDateTime": "2024-03-01"
+  },
+  {
+    "id": "A-9002",
+    "resourceType": "DiagnosticReport",
+    "status": "final",
+    "code": {
+      "coding": [
+        {
+          "system": "http://loinc.org",
+          "code": "718-7",
+          "display": "Hemoglobin"
+        }
+      ],
+      "text": "Hemoglobin"
+    },
+    "subject": {
+      "reference": "Patient/P101"
+    },
+    "effectiveDateTime": "2024-03-01"
+  },
+  {
+    "id": "A-9003",
+    "resourceType": "DiagnosticReport",
+    "status": "corrected",
+    "code": {
+      "coding": [
+        {
+          "system": "http://loinc.org",
+          "code": "2951-2",
+          "display": "Sodium"
+        }
+      ],
+      "text": "Sodium"
+    },
+    "subject": {
+      "reference": "Patient/P102"
+    },
+    "effectiveDateTime": "2024-03-02"
+  }
+]

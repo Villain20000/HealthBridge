@@ -1,0 +1,56 @@
+[
+  {
+    "id": "I001",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Müller",
+        "given": ["Jürgen"]
+      }
+    ],
+    "gender": "female",
+    "birthDate": "1990-02-17",
+    "extension": [
+      {
+        "url": "https://healthbridge.dev/fhir/StructureDefinition/source-weight-kg",
+        "valueDecimal": 72.5
+      }
+    ]
+  },
+  {
+    "id": "I002",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "Ñúñez",
+        "given": ["Ana María"]
+      }
+    ],
+    "gender": "male",
+    "birthDate": "1985-11-03",
+    "extension": [
+      {
+        "url": "https://healthbridge.dev/fhir/StructureDefinition/source-weight-kg",
+        "valueDecimal": 80.1
+      }
+    ]
+  },
+  {
+    "id": "I003",
+    "resourceType": "Patient",
+    "name": [
+      {
+        "family": "李",
+        "given": ["伟"]
+      }
+    ],
+    "gender": "female",
+    "birthDate": "1978-06-30",
+    "extension": [
+      {
+        "url": "https://healthbridge.dev/fhir/StructureDefinition/source-weight-kg",
+        "valueDecimal": 55
+      }
+    ]
+  }
+]
