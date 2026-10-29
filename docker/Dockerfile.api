@@ -3,7 +3,7 @@
 # It runs the compiled build from a lockfile install and drops privileges: an API
 # that ingests patient files should not be able to write anywhere except its data
 # volume, and should not be root when (not if) a dependency has a bad day.
-FROM node:22-alpine AS builder
+FROM node:25-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json tsconfig.json ./
 COPY packages ./packages
@@ -13,7 +13,7 @@ RUN npm ci
 RUN npm run build
 RUN npm prune --omit=dev
 
-FROM node:22-alpine AS runner
+FROM node:25-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
