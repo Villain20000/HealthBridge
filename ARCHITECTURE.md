@@ -52,7 +52,7 @@ Sensitivity is **policy-driven** (`classifySensitivity` + `SensitivityRule[]`); 
 
 ## 5. Mapping engine
 
-Declarative rules only. Eleven deterministic transforms; unknown transform kinds are a hard error (`assertNever`). Conditions gate rules. Failures reject the *value* (and the record when `required`) instead of writing a wrong type. Coverage is computed on source **leaf paths**.
+Declarative rules only. Thirteen deterministic transforms; unknown transform kinds are a hard error (`assertNever`). Conditions gate rules. Failures reject the *value* (and the record when `required`) instead of writing a wrong type. Coverage is computed on source **leaf paths**.
 
 ## 6. Trace protocol v1.2
 
@@ -132,8 +132,8 @@ proxy contract and test strategy: [docs/console.md](docs/console.md).
 
 ## 10. Testing
 
-`node:test` via `npm test` (run through `scripts/run-tests.mjs`, 279 tests, plus 13 live-MySQL
-tests that run when `HEALTHBRIDGE_TEST_MYSQL_URL` is set) covering redaction,
+`node:test` via `npm test` (run through `scripts/run-tests.mjs`, plus live-MySQL tests that run
+when `HEALTHBRIDGE_TEST_MYSQL_URL` is set) covering redaction,
 path semantics, transforms, date determinism, coverage, rejection reporting, CSV
 tokenizer/encodings, detection ranking, NDJSON issue reporting, pipeline determinism, CLI
 behaviour/exit codes, CLI/SDK parity, four scenario packages, API keys/roles/rate limiting,

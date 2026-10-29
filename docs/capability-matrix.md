@@ -40,7 +40,7 @@ The CLI prints exactly which levels ran; it never implies levels 4–6 were exec
 
 ## Mapping transforms
 
-`identity`, `uppercase`, `lowercase`, `trim`, `parse_date_iso`, `format_gender_fhir`, `concat`, `split`, `number_to_string`, `string_to_number`, `default_value` — all implemented, all covered by tests.
+`identity`, `uppercase`, `lowercase`, `trim`, `parse_date_iso`, `format_gender_fhir`, `concat`, `split`, `number_to_string`, `string_to_number`, `default_value`, `to_reference`, `codeable_concept` — all implemented, all covered by tests.
 Anything else is a hard error. No JavaScript evaluation anywhere.
 
 ## Platform (API, persistence, auth, storage)
@@ -76,7 +76,7 @@ Anything else is a hard error. No JavaScript evaluation anywhere.
 |---|---|---|
 | 1 — source structural | Supported | adapter issues, per-record `sourceLocation` |
 | 2 — mapping definition | Supported | static checks before any record is mapped |
-| 3 — target structural | Partially supported | FHIR R4 checks for Patient / Observation / Specimen / DiagnosticReport / generic `resourceType` |
+| 3 — target structural | Partially supported | FHIR R4 checks for Patient / Observation / Specimen and the generic `resourceType` requirement |
 | 4 — profile | Planned | requires an external validator adapter |
 | 5 — terminology | Planned | requires licensed code systems |
 | 6 — referential integrity | Planned | lands with Bundle workflows |

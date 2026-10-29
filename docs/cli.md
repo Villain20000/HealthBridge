@@ -130,6 +130,6 @@ Adapters in use, and bundled examples/datasets. Third-party adapters are privile
 
 ## Trace report
 
-`transform --json` includes `traces[]` (protocol v1.1). Events carry `stage` (`detect`, `adapter-selection`, `parse`, `mapping`, `export`), `spanId`, adapter/engine versions, `recordIndex`, `sourcePath`, `ruleId`, `status`, `durationMs`, `issues[]` and `redactionState`.
+`transform --json` includes `traces[]` (protocol v1.2). Events carry `stage` (`detect`, `adapter-selection`, `parse`, `mapping`, `export`), `spanId`, adapter/engine versions, `recordIndex`, `sourcePath`, `ruleId`, `status`, `durationMs`, `issues[]` and `redactionState`.
 
 Snippets are redacted by default: direct identifiers (SSN, MRN, national id, phone, e-mail, address, tokens) and quasi-identifiers (names, birth dates, postal codes, city) are masked; clinical codes and quantities are preserved for debugging. Long strings and arrays are truncated. Set the SDK's `debug.payloadMode: "full"` only for local, non-persisted debugging.
