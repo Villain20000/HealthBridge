@@ -20,6 +20,8 @@ authentication system. Read the security model before exposing it anywhere.
 | Runs list | Yes | Cursor pagination, status filters, submit a new run |
 | Run detail | Yes | Lifecycle, counts, issues, generated resources, traces, run bundle, cancel, replay |
 | Live progress | Yes | `fetch` + `ReadableStream` SSE, reconnect with `Last-Event-ID`, connection chip |
+| Studio | Yes | Landing screen with the latest five runs, assets and mappings, and per-run stored-trace debugger links |
+| Stored-trace debugger | Yes | Filters, stage summary, virtualised timeline, payloads, declared rule provenance, resource/snippet diffs, filtered JSON export; reads stored rows only — no live attach, SSE, polling or breakpoints |
 | Assets | Yes | Upload (size limit read from the API), list, download link, checksum display |
 | Mappings | Yes | Import spec, versions, inspect the stored spec |
 | Pipelines | Yes | Create (mapping + engine config), list, run against an asset → the run it produced |
@@ -121,8 +123,11 @@ src/app/
                loading state, planned-feature card
   layout/      authenticated shell: header, nav, mode/queue badges, theme, disconnect
   features/    one folder per route, lazy loaded:
-               connect, dashboard, runs, run-detail, assets, mappings, keys, audit
+               connect, dashboard, runs, run-detail, assets, mappings, keys, audit, studio
 ```
+
+The Studio (`features/studio/`) contains the landing screen and the stored-trace debugger; the
+debugger reads through a page-scoped store and never opens a stream.
 
 Conventions that keep the Studio additive:
 
@@ -138,7 +143,7 @@ Conventions that keep the Studio additive:
 - **API access never lives in a component template**; components call `ApiClient` and hold
   state, which is what a future visual debugger needs.
 
-Adding the Studio means adding `features/studio-*` routes and reusing `ui/` and `core/`.
+Adding the Studio means adding `features/studio/` routes and reusing `ui/` and `core/`.
 Nothing about the current routes has to be rewritten.
 
 ---
@@ -149,15 +154,16 @@ Nothing about the current routes has to be rewritten.
 |---|---|---|
 | Logic unit tests | `npm run test:web` | SSE frame parser (chunk boundaries, CRLF, comments, duplicate ids), error mapping, formatters, key masking, and the proxy contract (headers, no-store, traversal, SSE passthrough) |
 | API integration | `npm test` | Includes the 413/`PAYLOAD_TOO_LARGE` and `INVALID_JSON` envelope regressions found by the console work |
-| End-to-end | `npm run test:e2e` | Playwright, Chromium, real API + real proxy |
+| End-to-end | `npm run test:e2e` | Playwright, Chromium, real API + real proxy; console, Studio and stored-trace debugger coverage |
 | End-to-end (containers) | `E2E_BASE_URL=http://127.0.0.1:4200 npx playwright test` (in `apps/web`) | The same suite against the composed stack |
-| Accessibility | part of E2E | axe (WCAG 2.0/2.1/2.2 A+AA tags) on connect and dashboard in both themes, keyboard navigation, 390 px overflow |
+| Accessibility | part of E2E | axe (WCAG 2.0 A/AA and 2.2 AA tags) on connect, dashboard (both themes), debugger and run detail, keyboard navigation including run-detail tabs, 390 px overflow on console, debugger and Studio screens |
 
 E2E data is **seeded through the API** (`apps/web/e2e/support/seed.mjs`): a unique
 workspace per run, a synthetic 24-row CSV, a mapping, a completed run, a viewer key and an
 upload asset. There are no hardcoded UI fixtures and no mocked API responses, except one
 test that intercepts the SSE route to prove the client sends `x-api-key`, never puts the
-key in the URL, and stops on the terminal frame.
+key in the URL, and stops on the terminal frame, and the debugger's deterministic 5,000-row
+trace fixture served through `page.route` — the only new API interception besides SSE.
 
 CI runs the suite twice: against a freshly built API + proxy, and against the Docker
 Compose stack.
@@ -176,3 +182,5 @@ Compose stack.
 - **No offline mode, no optimistic writes, no client-side cache.** Every view reads the API.
 - **Rate limiting is per key**; the console shows the limits but does not retry with
   backoff on `429` beyond surfacing the error.
+- **The stored-trace debugger is stored replay only.** It never attaches to a running run;
+  per-rule observed lineage is never recorded and rule conditions are printed, not evaluated.

@@ -24,11 +24,11 @@ test.describe("keys and audit", () => {
     expect(stored).not.toContain(secret);
 
     await page.reload();
-    await expect(page).toHaveURL(/\/connect$/);
+    await expect(page).toHaveURL(/\/connect\?returnUrl=%2Fkeys$/);
 
     await page.getByLabel("API key", { exact: true }).fill(secret);
     await page.getByRole("button", { name: "Connect", exact: true }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/keys$/);
 
     // The viewer key cannot administer keys — the API says 403, the console is honest about it.
     await clientNavigate(page, "/keys");

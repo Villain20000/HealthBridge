@@ -342,6 +342,179 @@ export interface RunBundle {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Mapping contracts                                                          */
+/* -------------------------------------------------------------------------- */
+
+export type TransformFunctionKind =
+  | "identity"
+  | "uppercase"
+  | "lowercase"
+  | "trim"
+  | "parse_date_iso"
+  | "format_gender_fhir"
+  | "concat"
+  | "split"
+  | "number_to_string"
+  | "string_to_number"
+  | "default_value"
+  | "to_reference"
+  | "codeable_concept";
+
+/** Supported transforms, in the same order as the engine's `TRANSFORM_FUNCTIONS`. */
+export const MAPPING_TRANSFORM_KINDS: readonly TransformFunctionKind[] = [
+  "identity",
+  "uppercase",
+  "lowercase",
+  "trim",
+  "parse_date_iso",
+  "format_gender_fhir",
+  "concat",
+  "split",
+  "number_to_string",
+  "string_to_number",
+  "default_value",
+  "to_reference",
+  "codeable_concept",
+];
+
+export type ConditionOperator =
+  "exists" | "not_exists" | "equals" | "not_equals" | "in" | "not_in" | "matches" | "gt" | "gte" | "lt" | "lte";
+
+export interface RuleCondition {
+  path: string;
+  op: ConditionOperator;
+  value?: unknown;
+}
+
+export interface MappingRule {
+  id: string;
+  sourcePath: string;
+  targetPath: string;
+  transform: TransformFunctionKind;
+  defaultValue?: unknown;
+  params?: Record<string, unknown>;
+  required?: boolean;
+  /** All conditions must hold for the rule to run. */
+  when?: RuleCondition[];
+  description?: string;
+}
+
+export interface MappingDefinition {
+  id: string;
+  name: string;
+  version: string;
+  sourceFormat: string;
+  targetFormat: string;
+  targetResourceType?: string;
+  targetProfile?: string;
+  description?: string;
+  /**
+   * Domains this mapping is intended for. When the detected source domain is
+   * not listed, the run emits a `DOMAIN_MISMATCH` warning instead of silently
+   * producing semantically wrong resources.
+   */
+  sourceDomains?: MedicalDomain[];
+  rules: MappingRule[];
+}
+
+export interface MappingFieldChange {
+  field: string;
+  from?: unknown;
+  to?: unknown;
+}
+
+export interface MappingRuleChange {
+  ruleId: string;
+  fields: MappingFieldChange[];
+}
+
+export interface MappingDiff {
+  metadata: MappingFieldChange[];
+  rules: {
+    added: MappingRule[];
+    removed: MappingRule[];
+    changed: MappingRuleChange[];
+    reordered: Array<{ ruleId: string; fromIndex: number; toIndex: number }>;
+    unchanged: number;
+  };
+  counts: { added: number; removed: number; changed: number; reordered: number; unchanged: number };
+  truncated: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lineage contracts                                                          */
+/* -------------------------------------------------------------------------- */
+
+export type RunStatus =
+  "queued" | "running" | "cancelling" | "cancelled" | "completed" | "completed_with_warnings" | "failed";
+
+export type LineageNodeType =
+  | "source_asset"
+  | "adapter"
+  | "source_field"
+  | "mapping_rule"
+  | "transformation_step"
+  | "target_field"
+  | "target_resource";
+
+export interface LineageNode {
+  id: string;
+  label: string;
+  type: LineageNodeType;
+  metadata?: Record<string, unknown>;
+}
+
+export interface LineageEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  label?: string;
+}
+
+export interface LineageGraph {
+  nodes: LineageNode[];
+  edges: LineageEdge[];
+}
+
+export interface DeclaredLineage extends LineageGraph {
+  name: string;
+  mappingId: string;
+  version: number;
+  basis: "declared";
+  rules: Array<{
+    ruleId: string;
+    sourcePath: string;
+    targetPath: string;
+    transform: TransformFunctionKind;
+    conditionCount: number;
+  }>;
+  truncated: boolean;
+}
+
+export interface RunLineageEvidence {
+  traceProtocolVersion: string;
+  mappingEvents: number;
+  records: number;
+  success: number;
+  warning: number;
+  error: number;
+  ruleLevel: false;
+  redacted: boolean;
+  note: string;
+}
+
+export interface RunLineage {
+  runId: string;
+  runStatus: RunStatus;
+  mappingId: string;
+  mappingVersion: number;
+  basis: "declared";
+  declared: DeclaredLineage;
+  evidence: RunLineageEvidence;
+  truncated: boolean;
+}
+
 /** Flatten an object into leaf paths, bounded by depth and array length. */
 export function flattenLeafPaths(
   value: unknown,

@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from "@angular/core";
+import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { JsonPipe } from "@angular/common";
 import { ActivatedRoute, Router, RouterLink } from "@angular/router";
 import { ApiClient } from "../../core/api-client";
 import { AuthStore } from "../../core/auth.store";
 import type { ApiProblem, Run, RunResourcesResponse, RunTracesResponse } from "../../core/api-types";
 import type { ValidationIssue } from "@healthbridge/shared-types";
-import { ErrorPanel, EmptyState, LoadingState, PlannedCard, StatusChip } from "../../ui/primitives";
+import { ErrorPanel, EmptyState, LoadingState, StatusChip } from "../../ui/primitives";
 import {
   elapsedBetween,
   formatBytes,
@@ -19,6 +20,13 @@ import { openSse, type SseConnectionState, type SseHandle } from "../../core/sse
 
 type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
 
+const TAB_VALUES: readonly Tab[] = ["overview", "issues", "resources", "traces", "bundle"];
+
+/** A `?tab=` value is only honoured when it names a real panel. */
+function isTab(value: string): value is Tab {
+  return (TAB_VALUES as readonly string[]).includes(value);
+}
+
 /**
  * Run detail: the lifecycle, the problems, the output, and live progress.
  *
@@ -29,7 +37,7 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
 @Component({
   selector: "hb-run-detail",
   standalone: true,
-  imports: [RouterLink, StatusChip, ErrorPanel, EmptyState, LoadingState, PlannedCard, JsonPipe],
+  imports: [RouterLink, StatusChip, ErrorPanel, EmptyState, LoadingState, JsonPipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-header">
@@ -110,9 +118,13 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
             type="button"
             class="small"
             role="tab"
+            [id]="'run-tab-' + entry.value"
+            [attr.aria-controls]="tab() === entry.value ? 'run-panel-' + entry.value : null"
             [class.primary]="tab() === entry.value"
             [attr.aria-selected]="tab() === entry.value"
+            [attr.tabindex]="tab() === entry.value ? 0 : -1"
             (click)="selectTab(entry.value)"
+            (keydown)="onTabKeydown($event, entry.value)"
           >
             {{ entry.label }}
           </button>
@@ -121,7 +133,13 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
 
       @switch (tab()) {
         @case ("overview") {
-          <section class="card">
+          <section
+            class="card"
+            role="tabpanel"
+            id="run-panel-overview"
+            [attr.aria-labelledby]="'run-tab-overview'"
+            tabindex="0"
+          >
             <h2>Lifecycle</h2>
             <dl class="kv">
               <dt>Queued</dt>
@@ -145,16 +163,24 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
             </dl>
 
             <div style="margin-top: 16px">
-              <hb-planned
-                title="Visual debugger"
-                message="Step-through, breakpoints and field provenance are planned for the Studio; this run's stored traces are available in the Traces tab today."
-              />
+              <h3>Stored-trace debugger</h3>
+              <p class="card-sub">
+                Replay this run's stored trace events with filters, declared rule provenance and diffs. The debugger
+                reads stored rows and never attaches to a live run.
+              </p>
+              <a class="button small" [routerLink]="['/studio/debugger', current.id]">Open stored-trace debugger</a>
             </div>
           </section>
         }
 
         @case ("issues") {
-          <section class="card">
+          <section
+            class="card"
+            role="tabpanel"
+            id="run-panel-issues"
+            [attr.aria-labelledby]="'run-tab-issues'"
+            tabindex="0"
+          >
             <h2>Validation issues</h2>
             <p class="card-sub">
               Problems the engine reported for this run, with the record index and field path where known.
@@ -198,7 +224,13 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
         }
 
         @case ("resources") {
-          <section class="card">
+          <section
+            class="card"
+            role="tabpanel"
+            id="run-panel-resources"
+            [attr.aria-labelledby]="'run-tab-resources'"
+            tabindex="0"
+          >
             <h2>Generated resources</h2>
             @if (resources(); as payload) {
               @if (payload.omitted) {
@@ -243,7 +275,13 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
         }
 
         @case ("traces") {
-          <section class="card">
+          <section
+            class="card"
+            role="tabpanel"
+            id="run-panel-traces"
+            [attr.aria-labelledby]="'run-tab-traces'"
+            tabindex="0"
+          >
             <h2>Traces</h2>
             @if (traces(); as payload) {
               @if (payload.traces.length === 0) {
@@ -284,7 +322,13 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
         }
 
         @case ("bundle") {
-          <section class="card">
+          <section
+            class="card"
+            role="tabpanel"
+            id="run-panel-bundle"
+            [attr.aria-labelledby]="'run-tab-bundle'"
+            tabindex="0"
+          >
             <h2>Reproducibility bundle</h2>
             <p class="card-sub">The stored envelope that <code>healthbridge reproduce</code> replays byte-for-byte.</p>
             @if (bundle(); as payload) {
@@ -295,6 +339,15 @@ type Tab = "overview" | "issues" | "resources" | "traces" | "bundle";
           </section>
         }
       }
+    }
+  `,
+  styles: `
+    /* The global button hover rule outranks button.primary, so a hovered selected tab would
+       otherwise lose its accent background and render white text on a light surface. */
+    .toolbar button.primary:hover:not(:disabled) {
+      background: var(--accent);
+      border-color: var(--accent);
+      filter: brightness(1.08);
     }
   `,
 })
@@ -347,7 +400,19 @@ export class RunDetailPage {
   });
 
   constructor() {
+    // A deep link may name the panel to show; an unknown value stays on the default overview.
+    const requested = this.route.snapshot.queryParamMap.get("tab");
+    if (requested !== null && isTab(requested)) this.tab.set(requested);
+
     this.reload();
+
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const next = params.get("tab");
+      if (next === null || !isTab(next) || next === this.tab()) return;
+      this.tab.set(next);
+      this.loadTab(next);
+    });
+
     this.destroyRef.onDestroy(() => this.teardown());
   }
 
@@ -374,9 +439,50 @@ export class RunDetailPage {
   /**
    * Tabs fetch on first view. Rendering a permanent spinner because a lazy load was never
    * triggered is the kind of "looks broken" state the console must not have.
+   *
+   * The URL mirrors the panel with `replaceUrl`, so Back leaves the page instead of walking
+   * through every tab the operator visited. The query-param subscription no-ops when the tab
+   * already matches, so this navigation cannot loop.
    */
   protected selectTab(tab: Tab): void {
     this.tab.set(tab);
+    this.loadTab(tab);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab: tab === "overview" ? null : tab },
+      queryParamsHandling: "merge",
+      replaceUrl: true,
+    });
+  }
+
+  /** Arrow keys, Home and End move between tabs; every other key is left to the browser. */
+  protected onTabKeydown(event: KeyboardEvent, value: Tab): void {
+    const values = this.tabs.map((entry) => entry.value);
+    const index = values.indexOf(value);
+    let next: Tab;
+    switch (event.key) {
+      case "ArrowLeft":
+        next = values[(index - 1 + values.length) % values.length];
+        break;
+      case "ArrowRight":
+        next = values[(index + 1) % values.length];
+        break;
+      case "Home":
+        next = values[0];
+        break;
+      case "End":
+        next = values[values.length - 1];
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    this.selectTab(next);
+    queueMicrotask(() => document.getElementById("run-tab-" + next)?.focus());
+  }
+
+  private loadTab(tab: Tab): void {
     if (tab === "resources" && !this.resources()) this.loadResources();
     if (tab === "traces" && !this.traces()) this.loadTraces();
     if (tab === "bundle" && !this.bundle()) this.loadBundle();

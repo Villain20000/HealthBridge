@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from "@angular/core";
 import { FormsModule } from "@angular/forms";
-import { Router } from "@angular/router";
+import { ActivatedRoute, Router } from "@angular/router";
 import { ApiClient } from "../../core/api-client";
 import { AuthStore } from "../../core/auth.store";
 import { describeProblem } from "../../core/api-errors";
+import { safeReturnUrl } from "../../core/navigation";
 import type { ApiProblem } from "../../core/api-types";
 import { ErrorPanel } from "../../ui/primitives";
 
@@ -127,6 +128,7 @@ export class ConnectPage {
   private readonly api = inject(ApiClient);
   private readonly auth = inject(AuthStore);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   protected baseUrl = "/api/v1";
   protected apiKey = "";
@@ -162,7 +164,7 @@ export class ConnectPage {
           next: () => {
             this.busy.set(false);
             this.apiKey = "";
-            void this.router.navigate(["/dashboard"]);
+            void this.router.navigateByUrl(this.destination());
           },
           error: (error: unknown) => {
             this.busy.set(false);
@@ -191,7 +193,7 @@ export class ConnectPage {
           this.bootstrapBusy.set(false);
           this.bootstrapToken = "";
           this.auth.connect(created.apiKey.key, this.baseUrl.trim() || "/api/v1");
-          void this.router.navigate(["/dashboard"]);
+          void this.router.navigateByUrl(this.destination());
         },
         error: (error: unknown) => {
           this.bootstrapBusy.set(false);
@@ -202,5 +204,9 @@ export class ConnectPage {
 
   protected describe(issue: ApiProblem): string {
     return describeProblem(issue);
+  }
+
+  private destination(): string {
+    return safeReturnUrl(this.route.snapshot.queryParamMap.get("returnUrl")) ?? "/dashboard";
   }
 }

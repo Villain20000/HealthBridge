@@ -1,20 +1,24 @@
-import { CoverageReport, ValidationIssue, MedicalDomain } from "@healthbridge/shared-types";
+import type {
+  ConditionOperator,
+  CoverageReport,
+  MappingDefinition,
+  MappingDiff,
+  MappingFieldChange,
+  MappingRule,
+  MappingRuleChange,
+  RuleCondition,
+  TransformFunctionKind,
+  ValidationIssue,
+} from "@healthbridge/shared-types";
 import { flattenLeafPaths } from "@healthbridge/shared-types";
 
-export type TransformFunctionKind =
-  | "identity"
-  | "uppercase"
-  | "lowercase"
-  | "trim"
-  | "parse_date_iso"
-  | "format_gender_fhir"
-  | "concat"
-  | "split"
-  | "number_to_string"
-  | "string_to_number"
-  | "default_value"
-  | "to_reference"
-  | "codeable_concept";
+export type {
+  TransformFunctionKind,
+  ConditionOperator,
+  RuleCondition,
+  MappingRule,
+  MappingDefinition,
+} from "@healthbridge/shared-types";
 
 export const TRANSFORM_FUNCTIONS: readonly TransformFunctionKind[] = [
   "identity",
@@ -31,46 +35,6 @@ export const TRANSFORM_FUNCTIONS: readonly TransformFunctionKind[] = [
   "to_reference",
   "codeable_concept",
 ];
-
-export type ConditionOperator =
-  "exists" | "not_exists" | "equals" | "not_equals" | "in" | "not_in" | "matches" | "gt" | "gte" | "lt" | "lte";
-
-export interface RuleCondition {
-  path: string;
-  op: ConditionOperator;
-  value?: unknown;
-}
-
-export interface MappingRule {
-  id: string;
-  sourcePath: string;
-  targetPath: string;
-  transform: TransformFunctionKind;
-  defaultValue?: unknown;
-  params?: Record<string, unknown>;
-  required?: boolean;
-  /** All conditions must hold for the rule to run. */
-  when?: RuleCondition[];
-  description?: string;
-}
-
-export interface MappingDefinition {
-  id: string;
-  name: string;
-  version: string;
-  sourceFormat: string;
-  targetFormat: string;
-  targetResourceType?: string;
-  targetProfile?: string;
-  description?: string;
-  /**
-   * Domains this mapping is intended for. When the detected source domain is
-   * not listed, the run emits a `DOMAIN_MISMATCH` warning instead of silently
-   * producing semantically wrong resources.
-   */
-  sourceDomains?: MedicalDomain[];
-  rules: MappingRule[];
-}
 
 export type RuleStatus = "mapped" | "defaulted" | "missing" | "rejected" | "condition_not_met" | "skipped";
 
@@ -786,4 +750,444 @@ export class MappingEngine {
 
     return issues;
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Safe structural validation                                                 */
+/* -------------------------------------------------------------------------- */
+
+const REQUIRED_TOP_LEVEL_FIELDS = ["id", "name", "version", "sourceFormat", "targetFormat"] as const;
+const OPTIONAL_TOP_LEVEL_STRING_FIELDS = ["targetResourceType", "targetProfile", "description"] as const;
+const REQUIRED_RULE_STRING_FIELDS = ["id", "sourcePath", "targetPath", "transform"] as const;
+const CONDITION_OPERATORS: readonly ConditionOperator[] = [
+  "exists",
+  "not_exists",
+  "equals",
+  "not_equals",
+  "in",
+  "not_in",
+  "matches",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+];
+const CONDITION_OPERATOR_SET: ReadonlySet<string> = new Set(CONDITION_OPERATORS);
+
+interface StructuralValidationResult {
+  definition?: MappingDefinition;
+  issues: ValidationIssue[];
+}
+
+function safeIsArray(value: unknown): value is unknown[] {
+  try {
+    return Array.isArray(value);
+  } catch {
+    return false;
+  }
+}
+
+function safeArrayLength(value: unknown[]): number {
+  try {
+    return value.length;
+  } catch {
+    return 0;
+  }
+}
+
+function readProperty(container: unknown, key: string | number): unknown {
+  try {
+    return (container as Record<string | number, unknown>)[key];
+  } catch {
+    return undefined;
+  }
+}
+
+function isObjectLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !safeIsArray(value);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isObjectLike(value)) return false;
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  } catch {
+    return false;
+  }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function invalidRuleField(pathPrefix: string, field: string, ruleId?: string): ValidationIssue {
+  return {
+    code: "MAPPING_RULE_INVALID_FIELD",
+    severity: "error",
+    message: `Rule field '${field}' has an invalid type`,
+    path: `${pathPrefix}.${field}`,
+    ...(ruleId !== undefined ? { ruleId } : {}),
+  };
+}
+
+function collectStructuralIssues(spec: Record<string, unknown>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  for (const field of REQUIRED_TOP_LEVEL_FIELDS) {
+    if (!isNonEmptyString(readProperty(spec, field))) {
+      issues.push({
+        code: "MAPPING_MISSING_FIELD",
+        severity: "error",
+        message: `Mapping definition field '${field}' is required`,
+        path: field,
+      });
+    }
+  }
+
+  for (const field of OPTIONAL_TOP_LEVEL_STRING_FIELDS) {
+    const value = readProperty(spec, field);
+    if (value !== undefined && typeof value !== "string") {
+      issues.push({
+        code: "MAPPING_INVALID_FIELD",
+        severity: "error",
+        message: `Mapping definition field '${field}' must be a string`,
+        path: field,
+      });
+    }
+  }
+
+  const sourceDomains = readProperty(spec, "sourceDomains");
+  if (sourceDomains !== undefined) {
+    const domains = safeIsArray(sourceDomains) ? sourceDomains : undefined;
+    if (!domains || domains.some((domain) => typeof domain !== "string")) {
+      issues.push({
+        code: "MAPPING_INVALID_FIELD",
+        severity: "error",
+        message: "Mapping definition field 'sourceDomains' must be an array of strings",
+        path: "sourceDomains",
+      });
+    }
+  }
+
+  const rules = readProperty(spec, "rules");
+  if (!safeIsArray(rules)) {
+    issues.push({
+      code: "MAPPING_RULES_NOT_ARRAY",
+      severity: "fatal",
+      message: "Mapping definition field 'rules' must be an array",
+      path: "rules",
+    });
+    return issues;
+  }
+
+  const ruleCount = safeArrayLength(rules);
+  for (let i = 0; i < ruleCount; i++) {
+    const rule = readProperty(rules, i);
+    const rulePath = `rules[${i}]`;
+
+    if (!isObjectLike(rule)) {
+      issues.push({
+        code: "MAPPING_RULE_NOT_OBJECT",
+        severity: "error",
+        message: `Rule at ${rulePath} must be an object`,
+        path: rulePath,
+      });
+      continue;
+    }
+
+    const idValue = readProperty(rule, "id");
+    const ruleId = isNonEmptyString(idValue) ? idValue : undefined;
+    const withRuleId = ruleId !== undefined ? { ruleId } : {};
+
+    for (const field of REQUIRED_RULE_STRING_FIELDS) {
+      const value = readProperty(rule, field);
+      const valid = field === "id" ? isNonEmptyString(value) : typeof value === "string";
+      if (!valid) {
+        issues.push({
+          code: "MAPPING_RULE_MISSING_FIELD",
+          severity: "error",
+          message: `Rule field '${field}' is required`,
+          path: `${rulePath}.${field}`,
+          ...withRuleId,
+        });
+      }
+    }
+
+    const params = readProperty(rule, "params");
+    if (params !== undefined && !isPlainObject(params)) {
+      issues.push(invalidRuleField(rulePath, "params", ruleId));
+    }
+
+    const required = readProperty(rule, "required");
+    if (required !== undefined && typeof required !== "boolean") {
+      issues.push(invalidRuleField(rulePath, "required", ruleId));
+    }
+
+    const when = readProperty(rule, "when");
+    if (when !== undefined && !safeIsArray(when)) {
+      issues.push(invalidRuleField(rulePath, "when", ruleId));
+    }
+
+    const description = readProperty(rule, "description");
+    if (description !== undefined && typeof description !== "string") {
+      issues.push(invalidRuleField(rulePath, "description", ruleId));
+    }
+
+    if (!safeIsArray(when)) continue;
+
+    const conditionCount = safeArrayLength(when);
+    for (let j = 0; j < conditionCount; j++) {
+      const condition = readProperty(when, j);
+      const conditionPath = `${rulePath}.when[${j}]`;
+
+      if (!isObjectLike(condition)) {
+        issues.push({
+          code: "MAPPING_RULE_INVALID_FIELD",
+          severity: "error",
+          message: `Condition at ${conditionPath} must be an object`,
+          path: conditionPath,
+          ...withRuleId,
+        });
+        continue;
+      }
+
+      if (typeof readProperty(condition, "path") !== "string") {
+        issues.push(invalidRuleField(conditionPath, "path", ruleId));
+      }
+
+      const op = readProperty(condition, "op");
+      if (typeof op !== "string") {
+        issues.push(invalidRuleField(conditionPath, "op", ruleId));
+      } else if (!CONDITION_OPERATOR_SET.has(op)) {
+        issues.push({
+          code: "MAPPING_UNKNOWN_CONDITION_OPERATOR",
+          severity: "error",
+          message: "Condition operator is not supported",
+          path: `${conditionPath}.op`,
+          ...withRuleId,
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+function validateStructure(spec: unknown): StructuralValidationResult {
+  if (!isObjectLike(spec)) {
+    return {
+      issues: [
+        {
+          code: "MAPPING_NOT_OBJECT",
+          severity: "fatal",
+          message: "Mapping definition must be an object",
+        },
+      ],
+    };
+  }
+
+  const issues = collectStructuralIssues(spec);
+  if (issues.length > 0) return { issues };
+
+  const definition = spec as unknown as MappingDefinition;
+  try {
+    issues.push(...new MappingEngine().validate(definition));
+    return { definition, issues };
+  } catch {
+    return {
+      issues: [
+        ...issues,
+        {
+          code: "MAPPING_NOT_OBJECT",
+          severity: "fatal",
+          message: "Mapping definition could not be read safely",
+        },
+      ],
+    };
+  }
+}
+
+/**
+ * Total structural validator. Malformed input (including `null`, arrays,
+ * primitives, `rules: [null]` and class instances) never throws; when the
+ * structure is sound the existing semantic checks are appended.
+ */
+export function validateMappingDefinition(spec: unknown): {
+  definition?: MappingDefinition;
+  issues: ValidationIssue[];
+} {
+  try {
+    return validateStructure(spec);
+  } catch {
+    return {
+      issues: [
+        {
+          code: "MAPPING_NOT_OBJECT",
+          severity: "fatal",
+          message: "Mapping definition could not be read safely",
+        },
+      ],
+    };
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Mapping diff                                                               */
+/* -------------------------------------------------------------------------- */
+
+const METADATA_FIELDS = [
+  "name",
+  "version",
+  "sourceFormat",
+  "targetFormat",
+  "targetResourceType",
+  "targetProfile",
+  "description",
+  "sourceDomains",
+] as const satisfies ReadonlyArray<keyof MappingDefinition>;
+
+const RULE_FIELDS = [
+  "sourcePath",
+  "targetPath",
+  "transform",
+  "defaultValue",
+  "params",
+  "required",
+  "when",
+  "description",
+] as const satisfies ReadonlyArray<keyof MappingRule>;
+
+const MAX_DIFF_ENTRIES = 500;
+
+/**
+ * Structural equality for JSON-like values. Object key order is irrelevant,
+ * array order matters, and an absent key equals an explicit `undefined`.
+ */
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (left === null || right === null) return false;
+  if (typeof left !== "object" || typeof right !== "object") return false;
+
+  const leftIsArray = Array.isArray(left);
+  const rightIsArray = Array.isArray(right);
+  if (leftIsArray !== rightIsArray) return false;
+
+  if (leftIsArray && rightIsArray) {
+    const leftArray = left as unknown[];
+    const rightArray = right as unknown[];
+    if (leftArray.length !== rightArray.length) return false;
+    for (let i = 0; i < leftArray.length; i++) {
+      if (!valuesEqual(leftArray[i], rightArray[i])) return false;
+    }
+    return true;
+  }
+
+  const leftEntries = Object.entries(left as Record<string, unknown>).filter(([, value]) => value !== undefined);
+  const rightEntries = Object.entries(right as Record<string, unknown>).filter(([, value]) => value !== undefined);
+  if (leftEntries.length !== rightEntries.length) return false;
+
+  const rightMap = new Map(rightEntries);
+  for (const [key, value] of leftEntries) {
+    if (!rightMap.has(key)) return false;
+    if (!valuesEqual(value, rightMap.get(key))) return false;
+  }
+  return true;
+}
+
+function indexRulesById(rules: MappingRule[]): Map<string, MappingRule> {
+  const byId = new Map<string, MappingRule>();
+  for (const rule of rules) {
+    // First occurrence wins when an id repeats.
+    if (!byId.has(rule.id)) byId.set(rule.id, rule);
+  }
+  return byId;
+}
+
+/**
+ * Compare two mapping definitions. Rule matching is by `id`; the result is
+ * deterministic, non-mutating, and caps each rule list at 500 entries while
+ * keeping full counts.
+ */
+export function diffMappingDefinitions(from: MappingDefinition, to: MappingDefinition): MappingDiff {
+  const metadata: MappingFieldChange[] = [];
+  for (const field of METADATA_FIELDS) {
+    const fromValue = from[field];
+    const toValue = to[field];
+    if (!valuesEqual(fromValue, toValue)) {
+      metadata.push({ field, from: fromValue, to: toValue });
+    }
+  }
+
+  const fromById = indexRulesById(from.rules);
+  const toById = indexRulesById(to.rules);
+
+  const fromCommonIds = Array.from(fromById.keys()).filter((id) => toById.has(id));
+  const toCommonIds = Array.from(toById.keys()).filter((id) => fromById.has(id));
+
+  const added: MappingRule[] = [];
+  const addedIds = new Set<string>();
+  for (const rule of to.rules) {
+    if (fromById.has(rule.id) || addedIds.has(rule.id)) continue;
+    addedIds.add(rule.id);
+    added.push(rule);
+  }
+
+  const removed: MappingRule[] = [];
+  const removedIds = new Set<string>();
+  for (const rule of from.rules) {
+    if (toById.has(rule.id) || removedIds.has(rule.id)) continue;
+    removedIds.add(rule.id);
+    removed.push(rule);
+  }
+
+  const changed: MappingRuleChange[] = [];
+  for (const ruleId of toCommonIds) {
+    const fromRule = fromById.get(ruleId)!;
+    const toRule = toById.get(ruleId)!;
+    const fields: MappingFieldChange[] = [];
+    for (const field of RULE_FIELDS) {
+      const fromValue = fromRule[field];
+      const toValue = toRule[field];
+      if (!valuesEqual(fromValue, toValue)) {
+        fields.push({ field, from: fromValue, to: toValue });
+      }
+    }
+    if (fields.length > 0) changed.push({ ruleId, fields });
+  }
+
+  const fromPositions = new Map(fromCommonIds.map((ruleId, index) => [ruleId, index]));
+  const toPositions = new Map(toCommonIds.map((ruleId, index) => [ruleId, index]));
+  const reordered: Array<{ ruleId: string; fromIndex: number; toIndex: number }> = [];
+  for (const ruleId of toCommonIds) {
+    const fromIndex = fromPositions.get(ruleId)!;
+    const toIndex = toPositions.get(ruleId)!;
+    if (fromIndex !== toIndex) reordered.push({ ruleId, fromIndex, toIndex });
+  }
+
+  const unchanged = toCommonIds.length - changed.length;
+  const truncated =
+    added.length > MAX_DIFF_ENTRIES ||
+    removed.length > MAX_DIFF_ENTRIES ||
+    changed.length > MAX_DIFF_ENTRIES ||
+    reordered.length > MAX_DIFF_ENTRIES;
+
+  return {
+    metadata,
+    rules: {
+      added: added.slice(0, MAX_DIFF_ENTRIES),
+      removed: removed.slice(0, MAX_DIFF_ENTRIES),
+      changed: changed.slice(0, MAX_DIFF_ENTRIES),
+      reordered: reordered.slice(0, MAX_DIFF_ENTRIES),
+      unchanged,
+    },
+    counts: {
+      added: added.length,
+      removed: removed.length,
+      changed: changed.length,
+      reordered: reordered.length,
+      unchanged,
+    },
+    truncated,
+  };
 }

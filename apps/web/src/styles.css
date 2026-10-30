@@ -655,6 +655,24 @@ th.mono {
   border: 0;
 }
 
+.skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 100;
+  transform: translateY(-200%);
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  box-shadow: var(--shadow-2);
+  text-decoration: none;
+}
+.skip-link:focus {
+  transform: translateY(0);
+}
+
 @media (max-width: 720px) {
   .topbar {
     flex-wrap: wrap;

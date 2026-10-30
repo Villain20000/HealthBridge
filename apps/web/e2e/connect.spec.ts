@@ -29,7 +29,7 @@ test.describe("connect", () => {
   test("drops the session when the tab reloads", async ({ page }) => {
     await signIn(page, state.key);
     await page.reload();
-    await expect(page).toHaveURL(/\/connect$/);
+    await expect(page).toHaveURL(/\/connect\?returnUrl=/);
     await expect(page.getByRole("heading", { name: "Connect to HealthBridge" })).toBeVisible();
   });
 
@@ -91,7 +91,7 @@ test.describe("connect", () => {
 
     // The next call fails with 401; the console drops the session and returns to /connect.
     await page.getByRole("link", { name: "Runs" }).click();
-    await expect(page).toHaveURL(/\/connect$/);
+    await expect(page).toHaveURL(/\/connect\?returnUrl=/);
     await expect(page.getByText(/the API key was rejected/i)).toBeVisible();
   });
 });

@@ -31,7 +31,7 @@ test.describe("accessibility", () => {
     await page.getByRole("link", { name: "Runs" }).click();
 
     // The skip link is focusable and is the first tab stop in the document.
-    const skip = page.locator("a.sr-only").first();
+    const skip = page.getByRole("link", { name: "Skip to content" });
     await skip.focus();
     await expect(skip).toBeFocused();
     await expect(skip).toHaveText(/Skip to content/);

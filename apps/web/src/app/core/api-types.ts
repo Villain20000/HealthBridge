@@ -10,6 +10,8 @@
  * hand and checked by the contract tests in `apps/web/test`.
  */
 
+import type { RunStatus } from "@healthbridge/shared-types";
+
 export type {
   ValidationIssue,
   IssueSeverity,
@@ -19,8 +21,7 @@ export type {
   RejectedRecord,
 } from "@healthbridge/shared-types";
 
-export type RunStatus =
-  "queued" | "running" | "cancelling" | "cancelled" | "completed" | "completed_with_warnings" | "failed";
+export type { RunStatus };
 
 export interface HealthLimits {
   maxUploadBytes: number;
@@ -132,6 +133,8 @@ export interface Run {
   coverage?: Record<string, unknown>;
   validation?: { isValid?: boolean; issueCounts?: Record<string, number> };
   summary?: Record<string, unknown>;
+  /** Stored output resources for this run (run detail only; list responses omit it). */
+  result?: { resources?: unknown[] };
   error?: { code?: string; message?: string } | null;
   options?: Record<string, unknown>;
   progress?: {

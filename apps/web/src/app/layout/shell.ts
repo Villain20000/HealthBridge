@@ -1,5 +1,7 @@
-import { ChangeDetectionStrategy, Component, effect, inject, signal } from "@angular/core";
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from "@angular/router";
+import { ChangeDetectionStrategy, Component, DestroyRef, effect, inject, signal } from "@angular/core";
+import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from "@angular/router";
+import { filter } from "rxjs/operators";
 import { AuthStore } from "../core/auth.store";
 import { ApiClient } from "../core/api-client";
 import type { Health } from "../core/api-types";
@@ -26,6 +28,7 @@ import type { Health } from "../core/api-types";
         @if (auth.isConnected()) {
           <nav class="nav" aria-label="Primary">
             <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+            <a routerLink="/studio" routerLinkActive="active">Studio</a>
             <a routerLink="/runs" routerLinkActive="active">Runs</a>
             <a routerLink="/assets" routerLinkActive="active">Assets</a>
             <a routerLink="/mappings" routerLinkActive="active">Mappings</a>
@@ -57,7 +60,7 @@ import type { Health } from "../core/api-types";
         </div>
       </header>
 
-      <main class="page">
+      <main id="main" class="page" tabindex="-1">
         <router-outlet />
       </main>
     </div>
@@ -67,6 +70,8 @@ export class ShellLayout {
   protected readonly auth = inject(AuthStore);
   private readonly api = inject(ApiClient);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+  private lastPath: string | null = null;
 
   protected readonly health = signal<Health | null>(null);
   protected readonly dark = signal(document.documentElement.dataset["theme"] !== "light");
@@ -75,13 +80,31 @@ export class ShellLayout {
     this.applyTheme();
     if (this.auth.isConnected()) this.refreshHealth();
 
+    // Focus follows a real page change, never a query or fragment update: a filter or tab
+    // change must not steal focus from the control the operator just used. The first observed
+    // navigation is the one that created this shell, so it is ignored.
+    this.router.events
+      .pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((event) => {
+        const path = event.urlAfterRedirects.split(/[?#]/)[0];
+        const previous = this.lastPath;
+        this.lastPath = path;
+        if (previous === null || previous === path) return;
+        queueMicrotask(() => document.getElementById("main")?.focus());
+      });
+
     // A 401 clears the key; without this the operator would sit on a shell whose navigation
     // has disappeared. Redirect once, and only when a session was just lost.
     effect(() => {
       const connected = this.auth.isConnected();
       const reason = this.auth.state().failure;
       if (!connected && reason && !this.router.url.startsWith("/connect")) {
-        void this.router.navigate(["/connect"]);
+        void this.router.navigate(["/connect"], {
+          queryParams: { returnUrl: this.router.url },
+        });
       }
     });
   }

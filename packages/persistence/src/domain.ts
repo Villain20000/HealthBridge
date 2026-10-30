@@ -9,9 +9,9 @@
  */
 
 import type { ApiKeyStore } from "@healthbridge/auth";
+import type { RunStatus } from "@healthbridge/shared-types";
 
-export type RunStatus =
-  "queued" | "running" | "cancelling" | "cancelled" | "completed" | "completed_with_warnings" | "failed";
+export type { RunStatus };
 
 export interface Workspace {
   id: string;
