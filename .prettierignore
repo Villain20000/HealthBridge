@@ -26,3 +26,6 @@ docs/
 tmp-*
 *.tgz
 datasets/
+
+# Nested git worktrees used for isolated feature work
+.worktrees/
