@@ -89,8 +89,14 @@ test.describe("connect", () => {
     });
     expect(revoke.ok()).toBe(true);
 
-    // The next call fails with 401; the console drops the session and returns to /connect.
-    await page.getByRole("link", { name: "Runs" }).click();
+    // The revoked key may fail an in-flight request (for example the shell's health read) and
+    // return to /connect before this click; both paths are a dropped session.
+    if (!page.url().includes("/connect")) {
+      await page
+        .getByRole("link", { name: "Runs" })
+        .click({ timeout: 15_000 })
+        .catch(() => {});
+    }
     await expect(page).toHaveURL(/\/connect\?returnUrl=/);
     await expect(page.getByText(/the API key was rejected/i)).toBeVisible();
   });
