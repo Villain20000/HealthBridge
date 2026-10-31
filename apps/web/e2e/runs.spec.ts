@@ -44,7 +44,8 @@ test.describe("runs", () => {
     await page.getByRole("button", { name: "New run" }).click();
 
     await page.getByLabel("Asset").selectOption(state.assetId);
-    await page.getByLabel("Mapping").selectOption(state.mappingId);
+    // The catalogue lists the latest version of each mapping; the seed publishes v2.
+    await page.getByLabel("Mapping").selectOption(state.mappingVersion2Id);
     await page.getByLabel("Max records (optional)").fill("3");
     await page.getByRole("button", { name: "Submit run" }).click();
 

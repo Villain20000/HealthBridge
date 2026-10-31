@@ -14,6 +14,8 @@ import { BootstrapRateLimiter } from "./common/bootstrap-rate-limiter.js";
 import { RunQueue } from "./jobs/run-queue.js";
 import { createRunWorker } from "./jobs/run-worker.js";
 import { AuditService } from "./services/audit.service.js";
+import { MappingPreviewService } from "./services/mapping-preview.service.js";
+import { MappingStudioService } from "./services/mapping-studio.service.js";
 import { RunService } from "./services/run.service.js";
 
 /**
@@ -32,6 +34,8 @@ export interface AppContext {
   bootstrapLimiter: BootstrapRateLimiter;
   queue: RunQueue;
   audit: AuditService;
+  studio: MappingStudioService;
+  preview: MappingPreviewService;
   runs: RunService;
   startedAt: string;
   close(): Promise<void>;
@@ -95,6 +99,9 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
 
   const audit = new AuditService(repos, { now, log });
 
+  const studio = new MappingStudioService({ repos, audit, now });
+  const preview = new MappingPreviewService({ repos, storage, audit, config });
+
   // In database mode the queue is a table: enqueue persists, every replica polls, and a
   // restart resumes whatever was pending instead of dropping it.
   const jobStore = config.database && connection ? new MySqlJobStore(connection, now) : undefined;
@@ -128,6 +135,8 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
     bootstrapLimiter,
     queue,
     audit,
+    studio,
+    preview,
     runs,
     startedAt: now().toISOString(),
     close: async () => {

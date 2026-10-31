@@ -10,7 +10,7 @@
  * hand and checked by the contract tests in `apps/web/test`.
  */
 
-import type { RunStatus } from "@healthbridge/shared-types";
+import type { MappingDiff, MappingDraft, MappingValidationResult, RunStatus } from "@healthbridge/shared-types";
 
 export type {
   ValidationIssue,
@@ -19,6 +19,12 @@ export type {
   TraceStage,
   CoverageReport,
   RejectedRecord,
+  MappingDiff,
+  MappingDraft,
+  MappingPreview,
+  MappingPreviewResponse,
+  MappingRule,
+  MappingValidationResult,
 } from "@healthbridge/shared-types";
 
 export type { RunStatus };
@@ -28,6 +34,8 @@ export interface HealthLimits {
   maxRequestBodyBytes: number;
   maxStoredResultBytes: number;
   maxTracesPerRun: number;
+  maxPreviewRecords: number;
+  maxPreviewBytes: number;
   rateLimit: { burst: number; refillPerSecond: number };
   queue: { concurrency: number; maxAttempts: number };
 }
@@ -252,6 +260,29 @@ export interface AssetsPage {
 export interface MappingsPage {
   mappings: Mapping[];
   nextCursor?: string;
+}
+
+/** `GET` and `PUT /mappings/:name/draft`. `draft` is null when no draft exists. */
+export interface MappingDraftView {
+  draft: MappingDraft | null;
+  latest: Mapping | null;
+  validation: MappingValidationResult | null;
+}
+
+/** `POST /mappings/:name/publish`. `draftRetained` is set when the draft could not be deleted. */
+export interface PublishMappingResponse {
+  mapping: Mapping;
+  created: boolean;
+  validation: MappingValidationResult;
+  draftRetained?: boolean;
+}
+
+/** `GET /mappings/:name/diff`. */
+export interface MappingDiffResponse {
+  name: string;
+  from: string;
+  to: string;
+  diff: MappingDiff;
 }
 
 export interface PipelinesPage {

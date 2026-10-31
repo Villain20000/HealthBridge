@@ -19,10 +19,14 @@ import type {
   Health,
   KeysResponse,
   Mapping,
+  MappingDiffResponse,
+  MappingDraftView,
+  MappingPreviewResponse,
   MappingsPage,
   Page,
   Pipeline,
   PipelinesPage,
+  PublishMappingResponse,
   Run,
   RunIssuesResponse,
   RunResourcesResponse,
@@ -158,6 +162,57 @@ export class ApiClient {
     return this.http
       .get<{ versions: Mapping[] }>(`${API_BASE}/mappings/${encodeURIComponent(name)}/versions`)
       .pipe(catchError(toProblem));
+  }
+
+  // ---- mapping studio: drafts, publish, diff, preview ----
+  public getMappingDraft(name: string): Observable<MappingDraftView> {
+    return this.http
+      .get<MappingDraftView>(`${API_BASE}/mappings/${encodeURIComponent(name)}/draft`)
+      .pipe(catchError(toProblem));
+  }
+
+  /** `revision` is the revision the caller last saw (0 for a first save); a stale one is a 409 `DRAFT_CONFLICT`. */
+  public saveMappingDraft(
+    name: string,
+    input: { spec: unknown; revision: number; baseVersion?: number },
+  ): Observable<MappingDraftView> {
+    return this.http
+      .put<MappingDraftView>(`${API_BASE}/mappings/${encodeURIComponent(name)}/draft`, input)
+      .pipe(catchError(toProblem));
+  }
+
+  /** Idempotent. Pass `revision` to refuse discarding a draft someone else has changed. */
+  public discardMappingDraft(name: string, revision?: number): Observable<void> {
+    let params = new HttpParams();
+    if (revision !== undefined) params = params.set("revision", revision);
+    return this.http
+      .delete<void>(`${API_BASE}/mappings/${encodeURIComponent(name)}/draft`, { params })
+      .pipe(catchError(toProblem));
+  }
+
+  public publishMapping(name: string, revision: number): Observable<PublishMappingResponse> {
+    return this.http
+      .post<PublishMappingResponse>(`${API_BASE}/mappings/${encodeURIComponent(name)}/publish`, { revision })
+      .pipe(catchError(toProblem));
+  }
+
+  /** `from` and `to` are `latest`, `draft` or a version number; the server defaults to latest → draft. */
+  public diffMapping(name: string, from?: string, to?: string): Observable<MappingDiffResponse> {
+    let params = new HttpParams();
+    if (from) params = params.set("from", from);
+    if (to) params = params.set("to", to);
+    return this.http
+      .get<MappingDiffResponse>(`${API_BASE}/mappings/${encodeURIComponent(name)}/diff`, { params })
+      .pipe(catchError(toProblem));
+  }
+
+  public previewMapping(input: {
+    spec: unknown;
+    assetId: string;
+    maxRecords?: number;
+    adapterId?: string;
+  }): Observable<MappingPreviewResponse> {
+    return this.http.post<MappingPreviewResponse>(`${API_BASE}/mappings/preview`, input).pipe(catchError(toProblem));
   }
 
   // ---- pipelines ----

@@ -1,21 +1,22 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from "@angular/core";
 import { FormsModule } from "@angular/forms";
 import { JsonPipe } from "@angular/common";
+import { RouterLink } from "@angular/router";
 import { ApiClient } from "../../core/api-client";
 import type { ApiProblem, Mapping } from "../../core/api-types";
-import { EmptyState, ErrorPanel, LoadingState, PlannedCard } from "../../ui/primitives";
+import { EmptyState, ErrorPanel, LoadingState } from "../../ui/primitives";
 import { formatRelative } from "../../core/format";
 
 /**
  * Mappings: list, inspect a version's spec, import a spec, and show the version history.
  *
- * The mapping *editor* (drag-and-drop, coverage heat map, diff) is Studio work and is shown as
- * `Planned` — a disabled editor button would be a lie.
+ * Draft editing lives in the Studio (`Open in Studio` opens `/studio/mappings/:name`): drag and
+ * drop with a keyboard path, the coverage heat map and the version diff are part of that editor.
  */
 @Component({
   selector: "hb-mappings",
   standalone: true,
-  imports: [FormsModule, JsonPipe, EmptyState, ErrorPanel, LoadingState, PlannedCard],
+  imports: [FormsModule, JsonPipe, RouterLink, EmptyState, ErrorPanel, LoadingState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-header">
@@ -102,6 +103,7 @@ import { formatRelative } from "../../core/format";
                 <td class="right">
                   <button type="button" class="small" (click)="inspect(mapping)">Inspect</button>
                   <button type="button" class="small" (click)="history(mapping.name)">Versions</button>
+                  <a class="button small" [routerLink]="['/studio/mappings', mapping.name]">Open in Studio</a>
                 </td>
               </tr>
             }
@@ -147,13 +149,6 @@ import { formatRelative } from "../../core/format";
         <pre>{{ mapping.spec | json }}</pre>
       </section>
     }
-
-    <div style="margin-top: 16px">
-      <hb-planned
-        title="Visual mapping studio"
-        message="Drag-and-drop editing with a keyboard-complete alternative, coverage heat map, draft autosave and version diff are planned for the Studio. Today the console imports and inspects specs."
-      />
-    </div>
   `,
 })
 export class MappingsPage {

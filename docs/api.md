@@ -55,6 +55,9 @@ from here instead of hardcoding them.
     "maxRequestBodyBytes": 1048576,
     "maxStoredResultBytes": 5242880,
     "maxTracesPerRun": 5000,
+    "maxPreviewRecords": 25,
+    "maxPreviewBytes": 524288,
+    "maxPreviewInputBytes": 8388608,
     "rateLimit": { "burst": 120, "refillPerSecond": 20 },
     "queue": { "concurrency": 2, "maxAttempts": 2 }
   },
@@ -69,6 +72,12 @@ duplicated in `/healthz`.
 An upload over `maxUploadBytes` returns `413` with code `PAYLOAD_TOO_LARGE`; a JSON body
 over `maxRequestBodyBytes` returns `413` with the same code; malformed JSON returns `400`
 `INVALID_JSON`. Both include a `requestId` for correlation.
+
+The preview limits follow the same rule. `maxPreviewRecords` caps a preview at 25 records by
+default and is clamped at 100 at load, so the reported value is the real maximum. A preview
+reads an asset no larger than `maxPreviewInputBytes`; a larger asset returns `413`
+`PAYLOAD_TOO_LARGE`. `maxPreviewBytes` is the byte budget of the preview response: detail is
+dropped in order (sample, rejected records, coverage detail, issues) and listed in `omitted`.
 
 Download responses carry `x-checksum` (the content-addressed SHA-256) and `x-request-id`.
 Both are exposed via `access-control-expose-headers` for cross-origin callers, and
@@ -147,7 +156,9 @@ All failures use one envelope:
 | `RATE_LIMITED` | 429 | token bucket empty (`retry-after` set) |
 | `NOT_FOUND` | 404 | not present **in this workspace** |
 | `CONFLICT` | 409 | e.g. duplicate mapping version |
+| `DRAFT_CONFLICT` | 409 | the supplied draft revision is stale (another save/delete/publish changed it); `details.currentRevision` carries the current revision |
 | `IDEMPOTENCY_CONFLICT` | 422 | same `Idempotency-Key`, different payload |
+| `MAPPING_VALIDATION_FAILED` | 422 | the spec (or a diff side) is structurally invalid; `details.issues` lists the problems and, for diff, `details.side` names the offending side |
 | `VALIDATION_FAILED` | 400 | bad body or parameter |
 | `INVALID_JSON` | 400 | body is not JSON |
 | `PAYLOAD_TOO_LARGE` | 413 | upload or body over the limit |
@@ -217,6 +228,12 @@ one object; the `metadata` row is what is tenant-scoped.
 | GET | `/mappings` | `mappings:read` |
 | GET | `/mappings/:id` | `mappings:read` |
 | GET | `/mappings/:name/versions` | `mappings:read` |
+| POST | `/mappings/preview` | `mappings:write` + `assets:read` |
+| GET | `/mappings/:name/draft` | `mappings:read` |
+| PUT | `/mappings/:name/draft` | `mappings:write` |
+| DELETE | `/mappings/:name/draft?revision=` | `mappings:write` |
+| POST | `/mappings/:name/publish` | `mappings:write` |
+| GET | `/mappings/:name/diff?from=&to=` | `mappings:read` |
 | POST | `/pipelines` | `pipelines:write` |
 | GET | `/pipelines` | `pipelines:read` |
 | GET | `/pipelines/:id` | `pipelines:read` |
@@ -224,6 +241,45 @@ one object; the `metadata` row is what is tenant-scoped.
 Posting an existing mapping `name` creates the next version. Versions are
 immutable and a run references a mapping **id**, so editing a mapping cannot
 silently change what an old run did.
+
+#### Drafts, preview and publish
+
+The Studio editor works on a server-side **draft** of a mapping, one per workspace and mapping
+`name`. A draft is not a version: runs cannot reference it until it is published.
+
+- `GET /mappings/:name/draft` returns `{ draft, latest, validation }`. `draft` is `null` when no
+  draft exists, and `latest` is the newest published version (or `null`).
+- `PUT /mappings/:name/draft` takes `{ spec, revision, baseVersion? }`. `revision` must equal the
+  draft's current revision (`0` when there is no draft yet), otherwise the call fails with
+  `409 DRAFT_CONFLICT`. A save that does not change the spec returns the current draft without a
+  new revision or audit event. Invalid specs are stored on purpose so autosave survives
+  mid-edit; the response's `validation` lists what is still wrong.
+- `DELETE /mappings/:name/draft` returns `204`. With `?revision=` it fails with
+  `409 DRAFT_CONFLICT` when the stored revision differs, and it succeeds when there is no draft.
+- `POST /mappings/:name/publish` takes `{ revision }` and returns
+  `{ mapping, created, validation, draftRetained? }`. A stale `revision` fails with
+  `409 DRAFT_CONFLICT`, and an invalid draft fails with `MAPPING_VALIDATION_FAILED`. When the
+  latest version already has the draft's spec, nothing new is created and `created` is `false`.
+  The draft is deleted on success; `draftRetained: true` means that delete failed.
+- `POST /mappings/preview` takes `{ spec, assetId, maxRecords?, adapterId? }` and dry-runs the
+  spec against a stored asset. It requires **both** `mappings:write` and `assets:read`; a key
+  without `assets:read` returns `403 FORBIDDEN` with `details.requiredScopes`. `maxRecords`
+  defaults to `maxPreviewRecords` and is capped at 100. The response is
+  `{ validation, preview }`: the outer `validation` is the structural result and `preview`
+  reports `adapter` (`id`, `version`, `format`), `recordsProcessed`, `recordsSucceeded`,
+  `recordsRejected`, `coverage`, `validation`, `issues` (max 200), `rejected` (max 10;
+  `partialOutput` stripped), `sample` (max 10 target resources), `durationMs`, `truncated`,
+  `omitted` (dropped labels such as `sample`, `rejected`, `coverage.detail` and `issues`) and
+  `bytes`. A preview is dry-run only: it creates no run and no mapping version. The audit event
+  records identifiers and counts (asset, adapter, `maxRecords`, rule count, processed/failed
+  counts, bytes, `truncated`) — never specs, samples or record values.
+  Without `adapterId`, the adapter id stored in the asset's metadata is used if that adapter is
+  still registered. Otherwise the adapter is detected from the asset's content. Two failures
+  return `400 VALIDATION_FAILED`, told apart by `error.details.reason`: `UNKNOWN_ADAPTER` (the
+  `adapterId` you sent is not registered; `details.adapterId` echoes it) and
+  `NO_COMPATIBLE_ADAPTER` (no registered adapter fits the asset).
+- `GET /mappings/:name/diff` compares two specs. `from` defaults to `latest` and `to` defaults
+  to `draft`.
 
 ### Runs
 

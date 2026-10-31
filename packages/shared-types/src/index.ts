@@ -442,6 +442,46 @@ export interface MappingDiff {
   truncated: boolean;
 }
 
+export interface MappingValidationResult {
+  isValid: boolean;
+  issues: ValidationIssue[];
+  counts: { fatal: number; error: number; warning: number; information: number };
+}
+
+export interface MappingDraft {
+  name: string;
+  revision: number;
+  baseVersion?: number;
+  spec: unknown;
+  specChecksum: string;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export type MappingPreviewRejectedRecord = Omit<RejectedRecord, "partialOutput">;
+
+export interface MappingPreview {
+  adapter: { id: string; version: string; format: string };
+  recordsProcessed: number;
+  recordsSucceeded: number;
+  recordsRejected: number;
+  coverage: CoverageReport;
+  validation: ValidationReport;
+  issues: ValidationIssue[]; // max 200
+  rejected: MappingPreviewRejectedRecord[]; // max 10, partialOutput stripped
+  sample: unknown[]; // max 10 target resources
+  durationMs: number;
+  truncated: boolean;
+  omitted: string[];
+  bytes: number;
+}
+
+export interface MappingPreviewResponse {
+  validation: MappingValidationResult;
+  preview: MappingPreview;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Lineage contracts                                                          */
 /* -------------------------------------------------------------------------- */

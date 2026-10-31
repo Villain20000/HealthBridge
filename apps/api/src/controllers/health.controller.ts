@@ -34,6 +34,9 @@ export class HealthController {
         maxRequestBodyBytes: this.ctx.config.limits.maxRequestBodyBytes,
         maxStoredResultBytes: this.ctx.config.limits.maxStoredResultBytes,
         maxTracesPerRun: this.ctx.config.limits.maxTracesPerRun,
+        maxPreviewRecords: this.ctx.config.limits.maxPreviewRecords,
+        maxPreviewBytes: this.ctx.config.limits.maxPreviewBytes,
+        maxPreviewInputBytes: this.ctx.config.limits.maxPreviewInputBytes,
         rateLimit: {
           burst: this.ctx.config.limits.rateLimit.capacity,
           refillPerSecond: this.ctx.config.limits.rateLimit.refillPerSecond,

@@ -1,8 +1,9 @@
 import { Body, Controller, Get, Inject, Param, Post, Query, Req } from "@nestjs/common";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { Principal } from "@healthbridge/auth";
 import { CurrentPrincipal, RequiresScope, type AuthenticatedRequest } from "../common/auth.guard.js";
 import { notFound, validationFailed } from "../common/errors.js";
+import { mappingSpecChecksum } from "../common/mapping-spec.js";
 import { optionalString, parseCursor, parseLimit, requireObject, requireSlug } from "../common/validate.js";
 import { APP_CONTEXT, type AppContext } from "../providers.js";
 
@@ -29,7 +30,7 @@ export class MappingsController {
     const spec = requireObject(payload.spec, "spec");
     if (!Array.isArray(spec.rules)) throw validationFailed("'spec.rules' must be an array.");
 
-    const checksum = `sha256:${createHash("sha256").update(JSON.stringify(spec)).digest("hex")}`;
+    const checksum = mappingSpecChecksum(spec);
     const mapping = await this.ctx.repos.mappings.create({
       id: `mp_${randomBytes(9).toString("hex")}`,
       workspaceId: principal.workspaceId,

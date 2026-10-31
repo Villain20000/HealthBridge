@@ -46,7 +46,7 @@ export function configureHttp(app: INestApplication, config: ApiConfig): void {
           "access-control-allow-headers",
           "content-type, x-api-key, x-request-id, idempotency-key, x-bootstrap-token, last-event-id",
         );
-        response.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
+        response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
         // Without this a browser cannot read the checksum or the request id, which is
         // exactly what an operator needs when a download or an error has to be traced.
         response.setHeader("access-control-expose-headers", "x-checksum, x-request-id, content-length, content-type");

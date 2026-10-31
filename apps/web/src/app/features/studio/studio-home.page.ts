@@ -108,7 +108,9 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
                 <tbody>
                   @for (mapping of mappings(); track mapping.id) {
                     <tr>
-                      <td class="mono">{{ mapping.name }}</td>
+                      <td class="mono">
+                        <a [routerLink]="['/studio/mappings', mapping.name]">{{ mapping.name }}</a>
+                      </td>
                       <td>v{{ mapping.version }}</td>
                       <td class="mono">{{ mapping.targetFormat }}</td>
                     </tr>
@@ -167,10 +169,6 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
     <section aria-labelledby="studio-tools-heading" style="margin-top: var(--space-5)">
       <h2 id="studio-tools-heading">Studio tools</h2>
       <div class="grid cols-2" style="margin-top: var(--space-3)">
-        <hb-planned
-          title="Mapping editor"
-          message="Draft autosave, revision conflicts, preview, publish and version diff are planned. The API has no draft endpoints yet."
-        />
         <hb-planned
           title="Schema explorer"
           message="Field paths and types for an asset are planned. No schema endpoint is exposed yet."

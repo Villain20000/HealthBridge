@@ -103,6 +103,10 @@ describe(
         workspaceId,
         otherWorkspaceId,
       ]);
+      await connection.execute("DELETE FROM mapping_drafts WHERE workspace_id IN (?, ?)", [
+        workspaceId,
+        otherWorkspaceId,
+      ]);
       await connection.execute("DELETE FROM mappings WHERE workspace_id IN (?, ?)", [workspaceId, otherWorkspaceId]);
       await connection.execute("DELETE FROM assets WHERE workspace_id IN (?, ?)", [workspaceId, otherWorkspaceId]);
       await connection.execute("DELETE FROM workspaces WHERE id IN (?, ?)", [workspaceId, otherWorkspaceId]);
@@ -221,6 +225,59 @@ describe(
       assert.equal(secondPage.items.length, 2);
       const ids = new Set([...firstPage.items, ...secondPage.items].map((entry) => entry.id));
       assert.equal(ids.size, 4, "pages must not overlap");
+    });
+
+    it("should persist drafts with optimistic revisions and keep tenants apart", async () => {
+      const name = `draft_${Math.random().toString(16).slice(2, 10)}`;
+      const input = {
+        workspaceId,
+        name,
+        spec: { id: name, rules: [{ id: "r1" }] },
+        specChecksum: `sha256:${"e".repeat(64)}`,
+        createdAt: now().toISOString(),
+        updatedAt: now().toISOString(),
+      };
+
+      const created = await repos.mappingDrafts.save(input, 0);
+      assert.equal(created.revision, 1);
+
+      await assert.rejects(
+        () => repos.mappingDrafts.save({ ...input, spec: { id: name, rules: [] } }, 0),
+        (error: unknown) => (error as { code?: string }).code === "CONFLICT",
+        "a second insert at revision 0 must conflict",
+      );
+
+      await assert.rejects(
+        () => repos.mappingDrafts.save({ ...input, spec: { id: name, rules: [] } }, 99),
+        (error: unknown) => (error as { code?: string }).code === "CONFLICT",
+        "a stale expected revision must conflict",
+      );
+
+      const updated = await repos.mappingDrafts.save(
+        {
+          ...input,
+          baseVersion: 1,
+          spec: { id: name, rules: [{ id: "r2" }] },
+          updatedAt: now().toISOString(),
+          updatedBy: "key_editor",
+        },
+        1,
+      );
+      assert.equal(updated.revision, 2);
+      assert.equal(updated.createdAt, created.createdAt, "createdAt must survive an update");
+      assert.equal(updated.baseVersion, 1);
+      assert.deepEqual(updated.spec, { id: name, rules: [{ id: "r2" }] });
+
+      assert.equal(await repos.mappingDrafts.delete(workspaceId, name, 1), false, "a stale conditional delete fails");
+      assert.ok(await repos.mappingDrafts.get(workspaceId, name), "a rejected delete must keep the row");
+      assert.equal(await repos.mappingDrafts.delete(workspaceId, name, 2), true, "the matching revision deletes");
+      assert.equal(await repos.mappingDrafts.get(workspaceId, name), undefined);
+
+      const otherName = `${name}_other`;
+      await repos.mappingDrafts.save({ ...input, workspaceId: otherWorkspaceId, name: otherName }, 0);
+      assert.equal(await repos.mappingDrafts.get(workspaceId, otherName), undefined, "tenant isolation on read");
+      assert.equal(await repos.mappingDrafts.delete(workspaceId, otherName), false, "tenant isolation on delete");
+      assert.equal((await repos.mappingDrafts.get(otherWorkspaceId, otherName))?.revision, 1);
     });
 
     it("should append and read audit events for the workspace", async () => {

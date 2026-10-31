@@ -236,6 +236,27 @@ export const MIGRATIONS: Migration[] = [
       ) ${TABLE_OPTIONS}`,
     ],
   },
+  {
+    version: 4,
+    name: "mapping_drafts",
+    statements: [
+      // A draft may exist before version 1, so it has no foreign key to `mappings`:
+      // only the owning workspace cascades.
+      `CREATE TABLE IF NOT EXISTS mapping_drafts (
+        workspace_id VARCHAR(32) NOT NULL,
+        name VARCHAR(200) NOT NULL,
+        spec JSON NOT NULL,
+        spec_checksum CHAR(71) NOT NULL,
+        revision INT NOT NULL,
+        base_version INT NULL,
+        created_at DATETIME(3) NOT NULL,
+        updated_at DATETIME(3) NOT NULL,
+        updated_by VARCHAR(64) NULL,
+        PRIMARY KEY (workspace_id, name),
+        CONSTRAINT fk_mapping_drafts_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces (id) ON DELETE CASCADE
+      ) ${TABLE_OPTIONS}`,
+    ],
+  },
 ];
 
 export function migrationChecksum(migration: Migration): string {
