@@ -157,6 +157,10 @@ the design intent behind those files — review with the author before closing D
 
 ## 8. Open work, in suggested order
 
+Every item below has a full specification in **[docs/planned/](docs/planned/README.md)**: current
+behaviour, missing API, proposed design, acceptance criteria and explicit non-goals. Nothing in
+that folder is implemented; the console renders these as `planned` cards.
+
 **8.1 Component-DOM tests** — the only gap against the approved test plan.
 Options: Vitest + `@analogjs/vitest-angular` (fast, no browser binary) or Karma + Chromium
 (`CHROME_BIN` from Playwright). Acceptance: `ng test` green in CI, specs for `StatusChip`,
