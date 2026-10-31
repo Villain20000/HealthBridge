@@ -11,6 +11,10 @@
 > **Operator Console** on top of it. Everything else is listed honestly in
 > [ROADMAP.md](ROADMAP.md) — this repository does not advertise features it has not implemented.
 
+**Where to look:** [PROGRESS.md](PROGRESS.md) — implemented and verified work plus the
+ordered backlog. [docs/planned/](docs/planned/README.md) — a written spec for every
+capability that is **not** built yet (no fake UI, no implied features).
+
 HealthBridge OS is a developer layer that sits between incompatible healthcare systems. It
 imports a dataset, builds a format-independent envelope, applies a declarative mapping, and
 reports exactly what was mapped, what was rejected and what was lost — with a redacted trace
