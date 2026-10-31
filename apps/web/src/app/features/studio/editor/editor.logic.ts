@@ -115,7 +115,125 @@ export function isDirty(spec: MappingDefinition, baseSpec: MappingDefinition | n
 /* -------------------------------------------------------------------------- */
 
 export function blankSpec(name: string): MappingDefinition {
-  return { id: name, name, version: "1.0.0", sourceFormat: "", targetFormat: "", rules: [] };
+  return { id: name, name, version: "1.0.0", sourceFormat: "auto", targetFormat: "fhir-r4", rules: [] };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Bounded JSON editor helpers                                                */
+/* -------------------------------------------------------------------------- */
+
+export type JsonParamShape = "string-list" | "string-map" | "scalar-array";
+
+export type JsonParamParse = { ok: true; value: unknown } | { ok: false; error: string };
+
+export const JSON_PARAM_MAX_CHARS = 10_000;
+export const JSON_PARAM_MAX_ITEMS = 100;
+
+function tooLargeJsonError(): string {
+  return "JSON is too large (limit 10,000 characters).";
+}
+
+function invalidJsonError(): string {
+  return "Invalid JSON.";
+}
+
+function parseStringList(value: unknown): JsonParamParse {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "Expected a JSON array of non-empty strings." };
+  }
+  if (value.length > JSON_PARAM_MAX_ITEMS) {
+    return { ok: false, error: "A string list can have at most 100 items." };
+  }
+  if (!value.every((item) => typeof item === "string" && item.length > 0)) {
+    return { ok: false, error: "Every item must be a non-empty string." };
+  }
+  return { ok: true, value };
+}
+
+function parseStringMap(value: unknown): JsonParamParse {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "Expected a JSON object whose values are strings." };
+  }
+  const entries = Object.entries(value);
+  if (entries.length > JSON_PARAM_MAX_ITEMS) {
+    return { ok: false, error: "A string map can have at most 100 keys." };
+  }
+  if (!entries.every(([, item]) => typeof item === "string")) {
+    return { ok: false, error: "Every value must be a string." };
+  }
+  return { ok: true, value };
+}
+
+function parseScalarArray(value: unknown): JsonParamParse {
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "Expected a JSON array of strings, finite numbers or booleans." };
+  }
+  if (value.length > JSON_PARAM_MAX_ITEMS) {
+    return { ok: false, error: "A scalar list can have at most 100 items." };
+  }
+  const scalar = (item: unknown): boolean =>
+    typeof item === "string" || typeof item === "boolean" || (typeof item === "number" && Number.isFinite(item));
+  if (!value.every(scalar)) {
+    return { ok: false, error: "Every item must be a string, finite number or boolean." };
+  }
+  return { ok: true, value };
+}
+
+/**
+ * Parses text typed into a bounded JSON editor. Empty text means "no value" (value: undefined).
+ * Never uses `eval` or `Function`; the parsed value is only shape-checked, not executed.
+ */
+export function parseJsonParam(text: string, shape: JsonParamShape): JsonParamParse {
+  if (text.trim() === "") return { ok: true, value: undefined };
+  if (text.length > JSON_PARAM_MAX_CHARS) return { ok: false, error: tooLargeJsonError() };
+
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return { ok: false, error: invalidJsonError() };
+  }
+
+  switch (shape) {
+    case "string-list":
+      return parseStringList(value);
+    case "string-map":
+      return parseStringMap(value);
+    case "scalar-array":
+      return parseScalarArray(value);
+  }
+}
+
+/** Pretty JSON for an editor, "" for undefined. */
+export function formatJsonParam(value: unknown): string {
+  if (value === undefined) return "";
+  return JSON.stringify(value, null, 2) ?? "";
+}
+
+/** Parses a single condition value: empty -> undefined; valid JSON keeps its type; else the raw text. */
+export function parseConditionLiteral(text: string): unknown {
+  if (text.trim() === "") return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Flags a plain-text default value that looks like JSON but does not parse. The value is still
+ * stored exactly as typed (`parseDefaultValue` falls back to text); the server remains authoritative.
+ */
+export function defaultValueProblem(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text.startsWith("{") && !text.startsWith("[")) return null;
+  try {
+    JSON.parse(text);
+    return null;
+  } catch {
+    return "Invalid JSON. Plain text cannot start with { or [.";
+  }
 }
 
 /**

@@ -6,7 +6,7 @@ import { StorageError, type StorageDriver } from "@healthbridge/storage";
 import type { MappingPreview, MappingPreviewResponse, TransformationResult } from "@healthbridge/shared-types";
 import type { ApiConfig } from "../config.js";
 import { ApiError, notFound, validationFailed } from "../common/errors.js";
-import { normaliseAndValidate, toValidationResult } from "../common/mapping-spec.js";
+import { MAX_MAPPING_ISSUES, normaliseAndValidate, toValidationResult } from "../common/mapping-spec.js";
 import type { AuditService } from "./audit.service.js";
 
 /**
@@ -23,7 +23,6 @@ export interface MappingPreviewDeps {
   storage: StorageDriver;
   audit: AuditService;
   config: ApiConfig;
-  now?: () => Date;
 }
 
 export interface PreviewInput {
@@ -174,10 +173,10 @@ export class MappingPreviewService {
         unmappedSourceFields: result.coverage.unmappedSourceFields.slice(0, MAX_PREVIEW_DETAIL_ENTRIES),
         mappedFieldPaths: result.coverage.mappedFieldPaths?.slice(0, MAX_PREVIEW_DETAIL_ENTRIES),
         rejectedFieldPaths: result.coverage.rejectedFieldPaths?.slice(0, MAX_PREVIEW_DETAIL_ENTRIES),
-        issues: result.coverage.issues.slice(0, MAX_PREVIEW_DETAIL_ENTRIES),
+        issues: result.coverage.issues.slice(0, MAX_MAPPING_ISSUES),
       },
       validation: result.validation,
-      issues: result.validation.issues.slice(0, MAX_PREVIEW_DETAIL_ENTRIES),
+      issues: result.validation.issues.slice(0, MAX_MAPPING_ISSUES),
       rejected: result.rejectedRecords
         .slice(0, MAX_REJECTED_RECORDS)
         .map(({ partialOutput: _partialOutput, ...rest }) => rest),
@@ -209,8 +208,10 @@ export class MappingPreviewService {
         preview.coverage.issues.length > 0;
       if (hasCoverageDetail) {
         preview.coverage.unmappedSourceFields = [];
-        preview.coverage.mappedFieldPaths = [];
-        preview.coverage.rejectedFieldPaths = [];
+        // Only clear optional arrays that the engine actually populated; an
+        // absent array must stay absent so truncation does not change the shape.
+        if (preview.coverage.mappedFieldPaths !== undefined) preview.coverage.mappedFieldPaths = [];
+        if (preview.coverage.rejectedFieldPaths !== undefined) preview.coverage.rejectedFieldPaths = [];
         preview.coverage.issues = [];
         preview.omitted.push("coverage.detail");
         measured = this.measure(preview);
@@ -228,7 +229,6 @@ export class MappingPreviewService {
         preview.validation.operationOutcomes = undefined;
         preview.coverage.issues = [];
         preview.omitted.push("issues");
-        this.measure(preview);
       }
     }
 

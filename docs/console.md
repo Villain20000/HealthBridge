@@ -20,7 +20,8 @@ authentication system. Read the security model before exposing it anywhere.
 | Runs list | Yes | Cursor pagination, status filters, submit a new run |
 | Run detail | Yes | Lifecycle, counts, issues, generated resources, traces, run bundle, cancel, replay |
 | Live progress | Yes | `fetch` + `ReadableStream` SSE, reconnect with `Last-Event-ID`, connection chip |
-| Studio | Yes | Landing screen with the latest five runs, assets and mappings, and per-run stored-trace debugger links |
+| Studio | Yes | Landing screen with the latest five runs, assets and mappings, per-run stored-trace debugger links, and the mapping editor (draft autosave, conflict handling, publish, version diff, preview) |
+| Mapping editor | Yes | `/studio/mappings/:name`: draft autosave and undo/redo, conflict resolution, publish with a server-validation gate, draft discard, read-only published versions, server version diff, JSON import/export, conditions and every transform parameter, coverage heat map, bounded preview |
 | Stored-trace debugger | Yes | Filters, stage summary, virtualised timeline, payloads, declared rule provenance, resource/snippet diffs, filtered JSON export; reads stored rows only — no live attach, SSE, polling or breakpoints |
 | Assets | Yes | Upload (size limit read from the API), list, download link, checksum display |
 | Mappings | Yes | Import spec, versions, inspect the stored spec |
@@ -127,11 +128,25 @@ src/app/
 ```
 
 The Studio (`features/studio/`) contains the landing screen, the stored-trace debugger and the
-mapping editor (`features/studio/editor/`). The debugger reads through a page-scoped store and
-never opens a stream. The editor's `MappingEditorStore` is also page-scoped: it owns the draft,
-debounced autosave (800 ms), undo/redo, 409 `DRAFT_CONFLICT` handling, previews and publishing,
-and is discarded when the operator leaves the page. A route guard asks before leaving with
-unsaved changes.
+mapping editor (`features/studio/editor/`) at `/studio/mappings/:name`. The debugger reads through
+a page-scoped store and never opens a stream. The editor's `MappingEditorStore` is also
+page-scoped: it owns the draft, debounced autosave (800 ms), undo/redo, 409 `DRAFT_CONFLICT`
+handling, previews and publishing, and is discarded when the operator leaves the page.
+
+The editor covers the whole draft lifecycle: autosave, undo/redo, conflict resolution (reload the
+server draft or overwrite it), publishing (pending edits are flushed first and the server validates
+the saved draft again before a version is created), and draft discard. It can open a published
+version read-only with `?version=N`, compare versions through the server-computed diff, import and
+export the JSON definition, edit rule conditions and every transform parameter (complex parameters
+use a bounded JSON editor), and show the coverage heat map of a preview. Previews use a record
+limit and are explicitly **preview only**: they run against a stored asset and never create a run.
+
+Keyboard model: `Ctrl/Cmd+S` flushes the draft, `Ctrl/Cmd+Z` / `Ctrl/Cmd+Y` undo and redo (the
+shortcuts intentionally leave text fields to native undo), and rule order changes through native
+drag and drop or the labelled Move up / Move down buttons. Unsaved work is protected by an inline
+dirty guard instead of a browser dialog: leaving flushes the draft, and when the save fails the
+page offers **Retry save** or **Discard and leave**. `beforeunload` is registered only while the
+draft is dirty.
 
 Conventions that keep the Studio additive:
 
@@ -158,17 +173,29 @@ Nothing about the current routes has to be rewritten.
 |---|---|---|
 | Logic unit tests | `npm run test:web` | SSE frame parser (chunk boundaries, CRLF, comments, duplicate ids), error mapping, formatters, key masking, and the proxy contract (headers, no-store, traversal, SSE passthrough) |
 | API integration | `npm test` | Includes the 413/`PAYLOAD_TOO_LARGE` and `INVALID_JSON` envelope regressions found by the console work |
-| End-to-end | `npm run test:e2e` | Playwright, Chromium, real API + real proxy; console, Studio and stored-trace debugger coverage |
+| End-to-end | `npm run test:e2e` | Playwright, Chromium, real API + real proxy; console, Studio, stored-trace debugger and mapping editor coverage |
 | End-to-end (containers) | `E2E_BASE_URL=http://127.0.0.1:4200 npx playwright test` (in `apps/web`) | The same suite against the composed stack |
-| Accessibility | part of E2E | axe (WCAG 2.0 A/AA and 2.2 AA tags) on connect, dashboard (both themes), debugger, mapping editor and run detail, keyboard navigation including run-detail tabs, 390 px overflow on console, debugger, editor and Studio screens |
+| Accessibility | part of E2E | axe (WCAG 2.0 A/AA and 2.2 AA tags) on connect, dashboard (both themes), debugger, mapping editor (both themes) and run detail, keyboard navigation including run-detail tabs and the mapping editor (add, reorder), 390 px overflow on console, debugger, editor and Studio screens |
+
+`studio-editor.spec.ts` covers the editor end to end: a keyboard-only new mapping (add, move,
+undo/redo, `Ctrl+S` flush, preview that creates no run, publish verified through the API),
+autosave against the seeded mapping, the seeded v1→v2 diff, conflict resolution after a revision
+bump through the API, blocked navigation with a forced 503 and a successful retry, a viewer-key
+403 that shows the code and request id, a read-only `?version=1` view, and JSON import/export
+(the invalid-import path leaves the draft unchanged).
 
 E2E data is **seeded through the API** (`apps/web/e2e/support/seed.mjs`): a unique
-workspace per run, a synthetic 24-row CSV, two mappings (one reserved for the editor specs,
-which save drafts and publish versions), a completed run, a viewer key and an upload asset.
+workspace per run, two synthetic CSV assets (24 rows and a header-only file), two mappings (one
+reserved for the editor specs, which save drafts and publish versions), a second version of the
+run mapping with one extra rule for the version-diff spec, two completed runs and a viewer key.
 There are no hardcoded UI fixtures and no mocked API responses, except one
 test that intercepts the SSE route to prove the client sends `x-api-key`, never puts the
 key in the URL, and stops on the terminal frame, and the debugger's deterministic 5,000-row
 trace fixture served through `page.route` — the only new API interception besides SSE.
+
+The mapping editor is also checked at 390 px with the version-diff and coverage tables visible:
+both tables stay inside their own scroll containers and the page never grows horizontally. The
+keyboard check adds a rule and reorders rules with focus plus Enter and no mouse clicks.
 
 CI runs the suite twice: against a freshly built API + proxy, and against the Docker
 Compose stack.

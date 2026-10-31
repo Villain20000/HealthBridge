@@ -32,8 +32,25 @@ interface DiffBody {
   diff: { counts: { added: number; removed: number; changed: number; reordered: number; unchanged: number } };
 }
 
+interface MappingBody {
+  mapping: {
+    id: string;
+    version: number;
+    spec: unknown;
+    specChecksum: string;
+    sourceFormat: string;
+    targetFormat: string;
+    targetResourceType?: string;
+  };
+}
+
 interface AuditBody {
-  events: Array<{ action: string; targetId?: string; metadata?: Record<string, unknown> }>;
+  events: Array<{
+    action: string;
+    targetType?: string;
+    targetId?: string;
+    metadata?: Record<string, unknown>;
+  }>;
 }
 
 function draftPath(name: string): string {
@@ -85,11 +102,35 @@ describe("mapping studio API", () => {
     assert.equal(created.body.validation?.isValid, true);
     assert.equal(created.body.latest, null);
 
+    const auditAfterCreate = await owner.request<AuditBody>("GET", "/api/v1/audit?limit=100");
+    assert.equal(auditAfterCreate.status, 200, auditAfterCreate.raw);
+    const savedBefore = auditAfterCreate.body.events.filter(
+      (entry) => entry.action === "mapping.draft-saved" && entry.targetId === name,
+    );
+    assert.equal(savedBefore.length, 1);
+    const savedEvent = savedBefore[0]!;
+    assert.equal(savedEvent.targetType, "mapping-draft");
+    assert.equal(savedEvent.targetId, name);
+    assert.deepEqual(Object.keys(savedEvent.metadata ?? {}).sort(), [
+      "issueCounts",
+      "name",
+      "revision",
+      "specChecksum",
+    ]);
+    assert.equal("spec" in (savedEvent.metadata ?? {}), false);
+
     const unchanged = await owner.request<DraftViewBody>("PUT", draftPath(name), {
       body: { spec, revision: 1 },
     });
     assert.equal(unchanged.status, 200, unchanged.raw);
     assert.equal(unchanged.body.draft?.revision, 1);
+
+    const auditAfterNoop = await owner.request<AuditBody>("GET", "/api/v1/audit?limit=100");
+    assert.equal(auditAfterNoop.status, 200, auditAfterNoop.raw);
+    const savedAfter = auditAfterNoop.body.events.filter(
+      (entry) => entry.action === "mapping.draft-saved" && entry.targetId === name,
+    );
+    assert.equal(savedAfter.length, savedBefore.length, "a checksum no-op save must not emit another audit event");
 
     const stale = await owner.request<ErrorBody>("PUT", draftPath(name), {
       body: { spec, revision: 0 },
@@ -147,6 +188,16 @@ describe("mapping studio API", () => {
 
     const again = await owner.request("DELETE", draftPath(name));
     assert.equal(again.status, 204, again.raw);
+
+    const audit = await owner.request<AuditBody>("GET", "/api/v1/audit?limit=100");
+    assert.equal(audit.status, 200, audit.raw);
+    const discarded = audit.body.events.find(
+      (entry) => entry.action === "mapping.draft-discarded" && entry.targetId === name,
+    );
+    assert.ok(discarded, "discarding a draft must be audited");
+    assert.equal(discarded.targetType, "mapping-draft");
+    assert.equal(discarded.targetId, name);
+    assert.deepEqual(Object.keys(discarded.metadata ?? {}).sort(), ["name", "revision"]);
   });
 
   it("returns 404 publishing a name without a draft", async () => {
@@ -251,6 +302,48 @@ describe("mapping studio API", () => {
     assert.equal(second.body.mapping.version, 2);
   });
 
+  it("derives publish formats from the definition and keeps the draft spec and checksum (R22)", async () => {
+    const name = "studio-publish-derivation";
+    // v1 deliberately disagrees with the definition on every derived field and has
+    // a different spec, so publishing the fixture draft must create (not no-op) v2.
+    const seedSpec = structuredClone(spec) as { rules: Array<Record<string, unknown>> } & Record<string, unknown>;
+    seedSpec.rules[2]!.targetPath = "name.0.familyName";
+
+    const seeded = await owner.request<MappingBody>("POST", "/api/v1/mappings", {
+      body: {
+        name,
+        spec: seedSpec,
+        sourceFormat: "hl7v2",
+        targetFormat: "fhir-stu3",
+        targetResourceType: "Observation",
+      },
+    });
+    assert.equal(seeded.status, 201, seeded.raw);
+    assert.equal(seeded.body.mapping.version, 1);
+
+    const draft = await owner.request<DraftViewBody>("PUT", draftPath(name), { body: { spec, revision: 0 } });
+    assert.equal(draft.status, 200, draft.raw);
+    const draftChecksum = draft.body.draft?.specChecksum;
+    assert.ok(draftChecksum, "the draft must expose its spec checksum");
+
+    const published = await owner.request<PublishBody>("POST", `/api/v1/mappings/${name}/publish`, {
+      body: { revision: 1 },
+    });
+    assert.equal(published.status, 200, published.raw);
+    assert.equal(published.body.created, true);
+    assert.equal(published.body.mapping.version, 2);
+
+    const fetched = await owner.request<MappingBody>("GET", `/api/v1/mappings/${published.body.mapping.id}`);
+    assert.equal(fetched.status, 200, fetched.raw);
+    assert.equal(fetched.body.mapping.id, published.body.mapping.id);
+    assert.equal(fetched.body.mapping.version, 2);
+    assert.equal(fetched.body.mapping.sourceFormat, "csv");
+    assert.equal(fetched.body.mapping.targetFormat, "fhir-r4");
+    assert.equal(fetched.body.mapping.targetResourceType, "Patient");
+    assert.deepEqual(fetched.body.mapping.spec, spec);
+    assert.equal(fetched.body.mapping.specChecksum, draftChecksum);
+  });
+
   it("diffs latest and draft, accepts a version token, and rejects bad tokens", async () => {
     const name = "studio-diff";
 
@@ -287,6 +380,51 @@ describe("mapping studio API", () => {
     assert.equal(badToken.status, 400, badToken.raw);
     assert.equal(badToken.body.error.code, "VALIDATION_FAILED");
     assert.match(badToken.body.error.message, /'from'/);
+  });
+
+  it("returns 422 with the invalid diff side and its issues (R15)", async () => {
+    const toName = "studio-diff-invalid-to";
+    const seededTo = await owner.request("POST", "/api/v1/mappings", { body: { name: toName, spec } });
+    assert.equal(seededTo.status, 201, seededTo.raw);
+    // The draft endpoint stores invalid specs on purpose, so the 'to' side is broken.
+    const invalidDraft = await owner.request<DraftViewBody>("PUT", draftPath(toName), {
+      body: { spec: { rules: "nope" }, revision: 0 },
+    });
+    assert.equal(invalidDraft.status, 200, invalidDraft.raw);
+
+    const invalidTo = await owner.request<ErrorBody>("GET", `/api/v1/mappings/${toName}/diff`);
+    assert.equal(invalidTo.status, 422, invalidTo.raw);
+    assert.equal(invalidTo.body.error.code, "MAPPING_VALIDATION_FAILED");
+    const toDetails = invalidTo.body.error.details as { side?: string; issues?: unknown[] };
+    assert.equal(toDetails.side, "to");
+    assert.ok(Array.isArray(toDetails.issues) && toDetails.issues.length > 0);
+
+    const fromName = "studio-diff-invalid-from";
+    // POST /mappings only requires spec.rules to be an array; it does not run the
+    // validator, which is how a stored mapping can be the invalid 'from' side.
+    const fromSpec = {
+      id: "bad",
+      name: fromName,
+      version: "1.0.0",
+      sourceFormat: "csv",
+      targetFormat: "fhir-r4",
+      rules: [{ id: "r1" }],
+    };
+    const seededFrom = await owner.request("POST", "/api/v1/mappings", {
+      body: { name: fromName, spec: fromSpec },
+    });
+    assert.equal(seededFrom.status, 201, seededFrom.raw);
+    const validDraft = await owner.request<DraftViewBody>("PUT", draftPath(fromName), {
+      body: { spec, revision: 0 },
+    });
+    assert.equal(validDraft.status, 200, validDraft.raw);
+
+    const invalidFrom = await owner.request<ErrorBody>("GET", `/api/v1/mappings/${fromName}/diff`);
+    assert.equal(invalidFrom.status, 422, invalidFrom.raw);
+    assert.equal(invalidFrom.body.error.code, "MAPPING_VALIDATION_FAILED");
+    const fromDetails = invalidFrom.body.error.details as { side?: string; issues?: unknown[] };
+    assert.equal(fromDetails.side, "from");
+    assert.ok(Array.isArray(fromDetails.issues) && fromDetails.issues.length > 0);
   });
 
   it("rejects malformed draft bodies without saving", async () => {

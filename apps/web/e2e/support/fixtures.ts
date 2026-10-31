@@ -5,9 +5,11 @@ import { expect, test as base, type Page } from "@playwright/test";
 /**
  * Shared fixtures.
  *
- * `state` is produced by the seed script (real API responses, never a mock). `console` opens
- * the app with the seeded key already entered — through the connect form, so the sign-in path
- * is exercised by every test that needs a session.
+ * `state` is produced by the seed script (real API responses, never a mock): a workspace, two
+ * CSV assets, the run mapping with a published v2 (one extra rule), the editor mapping, two
+ * completed runs and a viewer key. `console` opens the app with the seeded key already entered
+ * — through the connect form, so the sign-in path is exercised by every test that needs a
+ * session.
  */
 // Playwright transpiles specs to CommonJS, where `__dirname` is available (unlike import.meta).
 export const STATE_FILE = join(__dirname, "..", ".state.json");
@@ -23,6 +25,9 @@ export interface SeedState {
   emptyAssetId: string;
   mappingId: string;
   mappingName: string;
+  /** The run mapping's published version 2 (one extra rule, used by the version-diff spec). */
+  mappingVersion2Id: string;
+  mappingVersion2Version: number;
   editorMappingId: string;
   editorMappingName: string;
   runId: string;

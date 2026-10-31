@@ -109,7 +109,7 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
                   @for (mapping of mappings(); track mapping.id) {
                     <tr>
                       <td class="mono">
-                        <a [routerLink]="['/studio/editor', mapping.name]">{{ mapping.name }}</a>
+                        <a [routerLink]="['/studio/mappings', mapping.name]">{{ mapping.name }}</a>
                       </td>
                       <td>v{{ mapping.version }}</td>
                       <td class="mono">{{ mapping.targetFormat }}</td>
@@ -169,10 +169,6 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
     <section aria-labelledby="studio-tools-heading" style="margin-top: var(--space-5)">
       <h2 id="studio-tools-heading">Studio tools</h2>
       <div class="grid cols-2" style="margin-top: var(--space-3)">
-        <hb-planned
-          title="Mapping version diff"
-          message="Comparing two mapping versions is planned. Draft editing, autosave, conflict handling, preview and publish are available by opening a mapping from the list above."
-        />
         <hb-planned
           title="Schema explorer"
           message="Field paths and types for an asset are planned. No schema endpoint is exposed yet."

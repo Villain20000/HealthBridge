@@ -34,6 +34,8 @@ export interface HealthLimits {
   maxRequestBodyBytes: number;
   maxStoredResultBytes: number;
   maxTracesPerRun: number;
+  maxPreviewRecords: number;
+  maxPreviewBytes: number;
   rateLimit: { burst: number; refillPerSecond: number };
   queue: { concurrency: number; maxAttempts: number };
 }

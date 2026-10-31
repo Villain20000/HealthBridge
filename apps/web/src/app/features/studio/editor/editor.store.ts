@@ -33,7 +33,10 @@ import type { EditHistory, RulePatch } from "./editor.logic";
 export const AUTOSAVE_DELAY_MS = 800;
 
 /** The part of `ApiClient` the editor uses. Tests can pass a fake with just these methods. */
-export type EditorApi = Pick<ApiClient, "getMappingDraft" | "saveMappingDraft" | "publishMapping" | "previewMapping">;
+export type EditorApi = Pick<
+  ApiClient,
+  "getMappingDraft" | "saveMappingDraft" | "discardMappingDraft" | "publishMapping" | "previewMapping"
+>;
 
 /** Injectable clock and timers so Node tests can drive autosave without waiting. */
 export interface EditorStoreOptions {
@@ -84,13 +87,16 @@ export class MappingEditorStore {
   private readonly startTimer: (callback: () => void, ms: number) => unknown;
   private readonly stopTimer: (handle: unknown) => void;
 
-  private nameValue: string | null = null;
+  private readonly nameSignal = signal<string | null>(null);
   private loadToken = 0;
   private saveToken = 0;
   private publishToken = 0;
+  private discardToken = 0;
   private previewToken = 0;
   private inFlight = false;
   private timer: unknown = null;
+  /** Resolvers for `flushAndSettle()` calls waiting on a save or a conflict. */
+  private readonly settleWaiters: Array<(settled: boolean) => void> = [];
 
   private readonly historySignal = signal<EditHistory | null>(null);
   private readonly baseSpecSignal = signal<MappingDefinition | null>(null);
@@ -109,6 +115,9 @@ export class MappingEditorStore {
   private readonly publishingSignal = signal(false);
   private readonly publishProblemSignal = signal<ApiProblem | null>(null);
   private readonly publishedSignal = signal<PublishMappingResponse | null>(null);
+
+  private readonly discardingSignal = signal(false);
+  private readonly discardProblemSignal = signal<ApiProblem | null>(null);
 
   private readonly previewingSignal = signal(false);
   private readonly previewSignal = signal<MappingPreviewResponse | null>(null);
@@ -135,6 +144,10 @@ export class MappingEditorStore {
   public readonly publishing: Signal<boolean> = this.publishingSignal.asReadonly();
   public readonly publishProblem: Signal<ApiProblem | null> = this.publishProblemSignal.asReadonly();
   public readonly lastPublished: Signal<PublishMappingResponse | null> = this.publishedSignal.asReadonly();
+
+  public readonly discarding: Signal<boolean> = this.discardingSignal.asReadonly();
+  /** Set when discarding the server draft failed for a reason other than a conflict. */
+  public readonly discardProblem: Signal<ApiProblem | null> = this.discardProblemSignal.asReadonly();
 
   public readonly previewing: Signal<boolean> = this.previewingSignal.asReadonly();
   public readonly preview: Signal<MappingPreviewResponse | null> = this.previewSignal.asReadonly();
@@ -174,6 +187,12 @@ export class MappingEditorStore {
 
   public readonly hasLocalBlockingIssue: Signal<boolean> = computed(() => hasBlockingIssue(this.localIssues()));
 
+  /** True when the server's last validation found fatal or error issues. Warnings never block. */
+  public readonly hasServerBlockingIssue: Signal<boolean> = computed(() => {
+    const validation = this.validationSignal();
+    return validation !== null && (validation.counts.fatal > 0 || validation.counts.error > 0);
+  });
+
   /** Publishing needs a saved draft, so it waits for any pending edit or conflict. */
   public readonly canPublish: Signal<boolean> = computed(
     () =>
@@ -181,8 +200,25 @@ export class MappingEditorStore {
       this.saveStateSignal() === "saved" &&
       this.revisionSignal() > 0 &&
       this.conflictSignal() === null &&
+      this.problemSignal() === null &&
       !this.publishingSignal() &&
-      !this.loadingSignal(),
+      !this.loadingSignal() &&
+      !this.discardingSignal() &&
+      !this.hasServerBlockingIssue(),
+  );
+
+  /** A server draft exists, nothing else is running, and the spec is editable. */
+  public readonly canDiscard: Signal<boolean> = computed(
+    () =>
+      this.nameSignal() !== null &&
+      this.spec() !== null &&
+      this.revisionSignal() > 0 &&
+      this.saveStateSignal() !== "saving" &&
+      this.conflictSignal() === null &&
+      this.problemSignal() === null &&
+      !this.publishingSignal() &&
+      !this.loadingSignal() &&
+      !this.discardingSignal(),
   );
 
   public constructor(api: EditorApi, options: EditorStoreOptions = {}) {
@@ -200,7 +236,12 @@ export class MappingEditorStore {
     this.saveToken++;
     this.loadToken++;
     this.publishToken++;
+    this.discardToken++;
     this.previewToken++;
+    this.publishingSignal.set(false);
+    this.discardingSignal.set(false);
+    this.previewingSignal.set(false);
+    this.resolveSettleWaiters(false);
   }
 
   /* ------------------------------------------------------------------------ */
@@ -209,11 +250,12 @@ export class MappingEditorStore {
 
   /** Loads the draft for `name`, or the latest version when no draft exists. Errors never throw. */
   public load(name: string): void {
-    if (this.nameValue !== name) {
+    if (this.nameSignal() !== name) {
       this.publishedSignal.set(null);
       this.publishProblemSignal.set(null);
     }
-    this.nameValue = name;
+    this.nameSignal.set(name);
+    this.discardProblemSignal.set(null);
     this.resetForLoad();
 
     const token = ++this.loadToken;
@@ -237,13 +279,16 @@ export class MappingEditorStore {
   private resetForLoad(): void {
     this.clearTimer();
     this.saveToken++;
+    this.discardToken++;
     this.previewToken++;
     this.inFlight = false;
+    this.discardingSignal.set(false);
     this.conflictSignal.set(null);
     this.saveProblemSignal.set(null);
     this.previewSignal.set(null);
     this.previewProblemSignal.set(null);
     this.previewingSignal.set(false);
+    this.resolveSettleWaiters(false);
   }
 
   private adoptView(name: string, view: MappingDraftView): void {
@@ -326,6 +371,15 @@ export class MappingEditorStore {
     this.commit({ ...history.present, [field]: value }, `spec.${field}`);
   }
 
+  /** Replaces the working spec after an import: history resets and the draft becomes dirty. */
+  public replaceSpec(spec: MappingDefinition): void {
+    if (this.historySignal() === null || this.editingLocked()) return;
+    this.historySignal.set(createHistory(spec));
+    this.selectedRuleIdSignal.set(spec.rules[0]?.id ?? null);
+    this.announce("Imported mapping definition.");
+    this.afterChange();
+  }
+
   public undo(): void {
     const history = this.historySignal();
     if (history === null || this.editingLocked()) return;
@@ -343,7 +397,7 @@ export class MappingEditorStore {
   }
 
   private editingLocked(): boolean {
-    return this.publishingSignal() || this.loadingSignal();
+    return this.publishingSignal() || this.loadingSignal() || this.discardingSignal();
   }
 
   private commit(next: MappingDefinition, key?: string): void {
@@ -407,10 +461,74 @@ export class MappingEditorStore {
     this.send(false);
   }
 
-  private send(force: boolean): void {
-    const name = this.nameValue;
+  /**
+   * Saves pending changes and resolves once the draft is clean.
+   *
+   * Resolves true when the draft is clean and no save is in flight (including the case where
+   * there was nothing to save). Resolves false when a conflict is open, a save fails, or the
+   * store is disposed while waiting. A pending debounce timer is flushed immediately, and edits
+   * made during a save are flushed again before the promise settles.
+   */
+  public flushAndSettle(): Promise<boolean> {
+    this.clearTimer();
+
+    if (this.conflictSignal() !== null) return Promise.resolve(false);
+    if (this.saveStateSignal() === "error" && !this.dirty()) return Promise.resolve(false);
+
+    const pending =
+      this.dirty() || this.inFlight || this.saveStateSignal() === "saving" || this.saveStateSignal() === "error";
+    if (!pending) return Promise.resolve(true);
+
+    const settled = new Promise<boolean>((resolve) => {
+      this.settleWaiters.push(resolve);
+    });
+
+    if (!this.inFlight) {
+      if (!this.dirty()) {
+        // `saving`/`error` without a request or unsaved edits cannot make progress.
+        this.resolveSettleWaiters(false);
+        return settled;
+      }
+      const token = this.saveToken;
+      this.send(false, true);
+      if (!this.inFlight && this.saveToken === token) this.resolveSettleWaiters(false);
+    }
+
+    return settled;
+  }
+
+  private resolveSettleWaiters(settled: boolean): void {
+    if (this.settleWaiters.length === 0) return;
+    const waiters = this.settleWaiters.splice(0);
+    for (const resolve of waiters) resolve(settled);
+  }
+
+  /** Called after a save succeeds or fails: continue flushing while dirty, or settle. */
+  private settleAfterSave(): void {
+    if (this.settleWaiters.length === 0) return;
+
+    if (this.conflictSignal() !== null || this.saveStateSignal() === "error") {
+      this.resolveSettleWaiters(false);
+      return;
+    }
+
+    if (this.dirty()) {
+      this.clearTimer();
+      const token = this.saveToken;
+      this.send(false, true);
+      if (!this.inFlight && this.saveToken === token) this.resolveSettleWaiters(false);
+      return;
+    }
+
+    this.resolveSettleWaiters(true);
+  }
+
+  private send(force: boolean, allowWhilePublishing = false): void {
+    const name = this.nameSignal();
     const history = this.historySignal();
-    if (name === null || history === null || this.inFlight || this.publishingSignal()) return;
+    if (name === null || history === null || this.inFlight || (this.publishingSignal() && !allowWhilePublishing)) {
+      return;
+    }
 
     const sent = history.present;
     if (!force && !isDirty(sent, this.baseSpecSignal())) return;
@@ -440,6 +558,7 @@ export class MappingEditorStore {
             message: "The server did not return the saved draft.",
           });
           this.saveStateSignal.set("error");
+          this.settleAfterSave();
           return;
         }
 
@@ -454,6 +573,7 @@ export class MappingEditorStore {
         } else {
           this.saveStateSignal.set("saved");
         }
+        this.settleAfterSave();
       },
       error: (error: ApiProblem) => {
         if (token !== this.saveToken) return;
@@ -463,11 +583,13 @@ export class MappingEditorStore {
           this.conflictSignal.set({ currentRevision: readCurrentRevision(error) });
           this.saveStateSignal.set("conflict");
           this.announce("The draft was changed elsewhere. Reload the server draft or overwrite it.");
+          this.resolveSettleWaiters(false);
           return;
         }
 
         this.saveProblemSignal.set(error);
         this.saveStateSignal.set("error");
+        this.resolveSettleWaiters(false);
       },
     });
   }
@@ -485,7 +607,7 @@ export class MappingEditorStore {
 
   /** Throws away local edits and history and loads the server's draft. */
   public reloadServerDraft(): void {
-    const name = this.nameValue;
+    const name = this.nameSignal();
     if (name === null || this.conflictSignal() === null) return;
     this.announce("Reloaded the server draft. Local changes were discarded.");
     this.load(name);
@@ -493,7 +615,7 @@ export class MappingEditorStore {
 
   /** Saves the local spec over the server's draft, using the server's current revision. */
   public overwrite(): void {
-    const name = this.nameValue;
+    const name = this.nameSignal();
     const conflict = this.conflictSignal();
     if (name === null || conflict === null || this.inFlight) return;
 
@@ -533,11 +655,59 @@ export class MappingEditorStore {
   /* Publish and preview                                                      */
   /* ------------------------------------------------------------------------ */
 
-  /** Publishes the saved draft. The server validates it again and can refuse. */
+  /**
+   * Publishes the draft. Pending edits are saved first; the server validates the saved draft
+   * again and can refuse. The POST starts synchronously when there is nothing to save.
+   */
   public publish(): void {
-    const name = this.nameValue;
-    if (name === null || !this.canPublish()) return;
+    const name = this.nameSignal();
+    if (
+      name === null ||
+      this.spec() === null ||
+      this.publishingSignal() ||
+      this.loadingSignal() ||
+      this.discardingSignal() ||
+      this.problemSignal() !== null ||
+      this.conflictSignal() !== null
+    ) {
+      return;
+    }
 
+    const pendingChanges =
+      this.dirty() || this.inFlight || this.saveStateSignal() === "saving" || this.saveStateSignal() === "error";
+
+    if (!pendingChanges) {
+      if (this.hasServerBlockingIssue() || this.revisionSignal() <= 0) return;
+      this.startPublish(name);
+      return;
+    }
+
+    const token = ++this.publishToken;
+    this.publishingSignal.set(true);
+    this.publishProblemSignal.set(null);
+
+    void this.flushAndSettle().then((settled) => {
+      if (token !== this.publishToken) return;
+
+      if (!settled) {
+        this.publishingSignal.set(false);
+        this.announce("The draft could not be saved, so it was not published.");
+        return;
+      }
+      if (this.hasServerBlockingIssue()) {
+        this.publishingSignal.set(false);
+        this.announce("The server validation found errors, so the draft was not published.");
+        return;
+      }
+      if (this.revisionSignal() <= 0) {
+        this.publishingSignal.set(false);
+        return;
+      }
+      this.startPublish(name);
+    });
+  }
+
+  private startPublish(name: string): void {
     const token = ++this.publishToken;
     this.publishingSignal.set(true);
     this.publishProblemSignal.set(null);
@@ -560,6 +730,42 @@ export class MappingEditorStore {
           return;
         }
         this.publishProblemSignal.set(error);
+      },
+    });
+  }
+
+  /**
+   * Discards the server draft, keeping the latest published version. The saved revision is sent
+   * so a newer draft written by someone else is never destroyed.
+   */
+  public discard(): void {
+    const name = this.nameSignal();
+    if (name === null || !this.canDiscard()) return;
+
+    this.clearTimer();
+    const token = ++this.discardToken;
+    this.discardingSignal.set(true);
+    this.discardProblemSignal.set(null);
+
+    this.api.discardMappingDraft(name, this.revisionSignal()).subscribe({
+      next: () => {
+        if (token !== this.discardToken) return;
+        this.discardingSignal.set(false);
+        this.announce("Draft discarded.");
+        this.load(name);
+      },
+      error: (error: ApiProblem) => {
+        if (token !== this.discardToken) return;
+        this.discardingSignal.set(false);
+
+        if (isDraftConflict(error)) {
+          this.conflictSignal.set({ currentRevision: readCurrentRevision(error) });
+          this.saveStateSignal.set("conflict");
+          this.announce("The draft was changed elsewhere. Reload the server draft or overwrite it.");
+          return;
+        }
+
+        this.discardProblemSignal.set(error);
       },
     });
   }

@@ -21,7 +21,7 @@ export const STUDIO_ROUTES: Routes = [
     loadComponent: () => import("./debugger/debugger.page").then((m) => m.DebuggerPage),
   },
   {
-    path: "editor/:name",
+    path: "mappings/:name",
     title: "Mapping editor · HealthBridge",
     canDeactivate: [unsavedChangesGuard],
     loadComponent: () => import("./editor/editor.page").then((m) => m.MappingEditorPage),

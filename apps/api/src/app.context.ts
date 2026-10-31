@@ -100,7 +100,7 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
   const audit = new AuditService(repos, { now, log });
 
   const studio = new MappingStudioService({ repos, audit, now });
-  const preview = new MappingPreviewService({ repos, storage, audit, config, now });
+  const preview = new MappingPreviewService({ repos, storage, audit, config });
 
   // In database mode the queue is a table: enqueue persists, every replica polls, and a
   // restart resumes whatever was pending instead of dropping it.

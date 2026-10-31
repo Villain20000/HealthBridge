@@ -189,6 +189,11 @@ export class MappingStudioService {
       return;
     }
 
+    // A revision supplied by the caller is enforced by the conditional delete
+    // above (a mismatch is a 409). A no-revision delete can race a concurrent
+    // save between the read and the delete; the event then names the revision
+    // that was observed, not necessarily the one removed. The web client always
+    // sends the revision, so that window is not reachable from the editor.
     await this.audit.record({
       workspaceId,
       actorKeyId: principal.apiKeyId,
@@ -255,24 +260,7 @@ export class MappingStudioService {
     }
 
     const retained = await this.deleteDraftForPublish(workspaceId, name, draft.revision);
-    await this.audit.record({
-      workspaceId,
-      actorKeyId: principal.apiKeyId,
-      action: "mapping.published",
-      targetType: "mapping",
-      targetId: mapping.id,
-      outcome: "success",
-      metadata: {
-        name,
-        mappingId: mapping.id,
-        version: mapping.version,
-        revision: draft.revision,
-        specChecksum: draft.specChecksum,
-        idempotent: false,
-      },
-      requestId: auditContext?.requestId,
-      ip: auditContext?.ip,
-    });
+    await this.auditPublished(principal, mapping, draft, false, auditContext);
 
     return {
       mapping,
@@ -320,6 +308,24 @@ export class MappingStudioService {
     auditContext?: RequestAuditContext,
   ): Promise<PublishMappingResult> {
     const retained = await this.deleteDraftForPublish(principal.workspaceId, name, draft.revision);
+    await this.auditPublished(principal, mapping, draft, true, auditContext);
+
+    return {
+      mapping,
+      created: false,
+      validation,
+      ...(retained ? { draftRetained: true } : {}),
+    };
+  }
+
+  /** R20 pins the published event's metadata set; one helper keeps both paths identical. */
+  private async auditPublished(
+    principal: Principal,
+    mapping: MappingRecord,
+    draft: MappingDraftRecord,
+    idempotent: boolean,
+    auditContext?: RequestAuditContext,
+  ): Promise<void> {
     await this.audit.record({
       workspaceId: principal.workspaceId,
       actorKeyId: principal.apiKeyId,
@@ -328,23 +334,16 @@ export class MappingStudioService {
       targetId: mapping.id,
       outcome: "success",
       metadata: {
-        name,
+        name: mapping.name,
         mappingId: mapping.id,
         version: mapping.version,
         revision: draft.revision,
         specChecksum: draft.specChecksum,
-        idempotent: true,
+        idempotent,
       },
       requestId: auditContext?.requestId,
       ip: auditContext?.ip,
     });
-
-    return {
-      mapping,
-      created: false,
-      validation,
-      ...(retained ? { draftRetained: true } : {}),
-    };
   }
 
   /** Returns true when a newer draft survived the conditional delete. */

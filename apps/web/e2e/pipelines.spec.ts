@@ -11,7 +11,8 @@ test.describe("pipelines", () => {
     await page.getByRole("link", { name: "Pipelines" }).click();
     await page.getByRole("button", { name: "New pipeline" }).click();
     await page.getByLabel("Name").fill(name);
-    await page.getByLabel("Mapping").selectOption(state.mappingId);
+    // The catalogue lists the latest version of each mapping; the seed publishes v2.
+    await page.getByLabel("Mapping").selectOption(state.mappingVersion2Id);
     await page.getByLabel("Config (JSON, optional)").fill('{"maxRecords":2}');
     await page.getByRole("button", { name: "Create pipeline" }).click();
 
@@ -28,7 +29,7 @@ test.describe("pipelines", () => {
     const { run } = await (
       await page.request.get(`/api/v1/runs/${runId}`, { headers: { "x-api-key": state.key } })
     ).json();
-    expect(run.mappingId).toBe(state.mappingId);
+    expect(run.mappingId).toBe(state.mappingVersion2Id);
     // The config is engine options, applied to the run the pipeline produced.
     expect(run.options?.maxRecords ?? run.options?.max_records ?? 2).toBeTruthy();
   });
@@ -37,7 +38,7 @@ test.describe("pipelines", () => {
     await page.getByRole("link", { name: "Pipelines" }).click();
     await page.getByRole("button", { name: "New pipeline" }).click();
     await page.getByLabel("Name").fill(`bad-config-${Date.now()}`);
-    await page.getByLabel("Mapping").selectOption(state.mappingId);
+    await page.getByLabel("Mapping").selectOption(state.mappingVersion2Id);
     await page.getByLabel("Config (JSON, optional)").fill("not json");
     await page.getByRole("button", { name: "Create pipeline" }).click();
 

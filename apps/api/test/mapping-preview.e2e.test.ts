@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
+import { HealthBridge } from "@healthbridge/sdk";
 import { loadConfig, loadTestConfig } from "../src/config.js";
+import { normaliseAndValidate } from "../src/common/mapping-spec.js";
 import { fixture, fixtureJson, startApi, type ApiClient, type TestApi } from "./harness.js";
 
 /**
@@ -16,7 +18,7 @@ interface PreviewBody {
     recordsSucceeded: number;
     recordsRejected: number;
     issues: unknown[];
-    rejected: unknown[];
+    rejected: Array<Record<string, unknown>>;
     sample: unknown[];
     validation: { isValid: boolean };
     truncated: boolean;
@@ -49,11 +51,15 @@ async function provision(api: TestApi, slug: string): Promise<ApiClient> {
   return api.client(response.body.apiKey.key);
 }
 
-async function uploadCsv(owner: ApiClient, filename = "patients.csv"): Promise<{ id: string; sizeBytes: number }> {
+async function uploadCsv(
+  owner: ApiClient,
+  filename = "patients.csv",
+  bytes: Buffer = fixture(...FIXTURE_CSV),
+): Promise<{ id: string; sizeBytes: number }> {
   const response = await owner.request<{ asset: { id: string; sizeBytes: number } }>(
     "POST",
     `/api/v1/assets?filename=${filename}`,
-    { raw: fixture(...FIXTURE_CSV), headers: { "content-type": "text/csv" } },
+    { raw: bytes, headers: { "content-type": "text/csv" } },
   );
   assert.equal(response.status, 201, response.raw);
   return response.body.asset;
@@ -106,6 +112,72 @@ describe("mapping preview API", () => {
     assert.ok(response.body.preview.bytes > 0);
   });
 
+  it("rejects records, strips partialOutput (R16) and caps the rejected list (R24)", async () => {
+    // R16: rejected records are returned without their best-effort partial target.
+    // R24: recordsRejected is the true count while only 10 rejected records are returned.
+    const header = "patient_id,family_name,given_name,sex,birth_date,mrn,city";
+    const rows = Array.from(
+      { length: 12 },
+      (_, index) => `,Family${index + 1},Given${index + 1},female,1990-02-17,MRN-${9000 + index + 1},City${index + 1}`,
+    );
+    const bytes = Buffer.from(`${header}\n${rows.join("\n")}\n`, "utf-8");
+    const rejectingAsset = await uploadCsv(owner, "rejected-patients.csv", bytes);
+
+    // The engine's target validation only reports issues it actually found, and the
+    // scenario mapping's clean partial targets produce none. Add one rule that writes
+    // an invalid FHIR gender so preview.issues is populated as well as rejected[].issues.
+    const rejectingSpec = structuredClone(spec) as {
+      rules: Array<Record<string, unknown>>;
+    } & Record<string, unknown>;
+    rejectingSpec.rules.push({
+      id: "r9",
+      sourcePath: "__constant.gender",
+      targetPath: "gender",
+      transform: "default_value",
+      defaultValue: "not-a-gender-code",
+    });
+
+    // Non-vacuity guard: the engine rejects every row with a populated partialOutput,
+    // so the absence of partialOutput in the HTTP response is the service's strip.
+    const definition = normaliseAndValidate(rejectingSpec).definition;
+    assert.ok(definition, "the rejecting preview spec must be valid");
+    const engineResult = await new HealthBridge({ keepRunsInMemory: false }).transform({
+      input: {
+        id: rejectingAsset.id,
+        filename: "rejected-patients.csv",
+        mimeType: "text/csv",
+        buffer: bytes,
+        sizeBytes: bytes.byteLength,
+      },
+      mapping: definition,
+      adapterId: "csv-adapter",
+      maxRecords: 100,
+    });
+    const engineRejected = engineResult.rejectedRecords[0];
+    assert.ok(engineRejected, "the engine must reject the synthetic rows");
+    assert.ok(
+      Object.keys(engineRejected.partialOutput).length > 0,
+      "the engine partialOutput must be non-empty before the service strips it",
+    );
+
+    const response = await owner.request<PreviewBody>("POST", PREVIEW_PATH, {
+      body: { spec: rejectingSpec, assetId: rejectingAsset.id, maxRecords: 100 },
+    });
+
+    assert.equal(response.status, 200, response.raw);
+    assert.equal(response.body.preview.recordsProcessed, 12);
+    assert.equal(response.body.preview.recordsSucceeded, 0);
+    assert.equal(response.body.preview.recordsRejected, 12);
+    assert.equal(response.body.preview.rejected.length, 10);
+    assert.equal(response.body.preview.omitted.includes("rejected"), false);
+    assert.ok(response.body.preview.issues.length > 0, "blocking issues must be reported");
+    for (const entry of response.body.preview.rejected) {
+      assert.equal(Object.hasOwn(entry, "partialOutput"), false, "partialOutput must be stripped");
+      assert.ok(Array.isArray(entry.issues) && entry.issues.length > 0, "each rejection must carry issues");
+    }
+    assert.deepEqual(response.body.preview.sample, []);
+  });
+
   it("does not create run or asset rows", async () => {
     const runsBefore = await owner.request<{ runs: unknown[] }>("GET", "/api/v1/runs");
     const assetsBefore = await owner.request<{ assets: unknown[] }>("GET", "/api/v1/assets");
@@ -156,6 +228,27 @@ describe("mapping preview API", () => {
     ]) {
       assert.equal(serialised.includes(value), false, `audit metadata must not contain ${value}`);
     }
+  });
+
+  it("does not audit a failed preview (R20)", async () => {
+    const auditBefore = await owner.request<AuditBody>("GET", "/api/v1/audit?limit=100");
+    assert.equal(auditBefore.status, 200, auditBefore.raw);
+    const countBefore = auditBefore.body.events.filter((entry) => entry.action === "mapping.previewed").length;
+
+    const invalid = await owner.request<ErrorBody>("POST", PREVIEW_PATH, {
+      body: { spec: { rules: "nope" }, assetId: asset.id },
+    });
+    assert.equal(invalid.status, 422, invalid.raw);
+
+    const missing = await owner.request<ErrorBody>("POST", PREVIEW_PATH, {
+      body: { spec, assetId: "as_missing" },
+    });
+    assert.equal(missing.status, 404, missing.raw);
+
+    const auditAfter = await owner.request<AuditBody>("GET", "/api/v1/audit?limit=100");
+    assert.equal(auditAfter.status, 200, auditAfter.raw);
+    const countAfter = auditAfter.body.events.filter((entry) => entry.action === "mapping.previewed").length;
+    assert.equal(countAfter, countBefore, "only a successful preview is audited");
   });
 
   it("validates the spec before looking up the asset", async () => {

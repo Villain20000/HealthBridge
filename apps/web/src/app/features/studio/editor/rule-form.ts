@@ -1,13 +1,34 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from "@angular/core";
 import { MAPPING_TRANSFORM_KINDS } from "@healthbridge/shared-types";
-import type { MappingRule, TransformFunctionKind } from "@healthbridge/shared-types";
-import { paramFields, usesDefaultValue } from "./editor.logic";
+import type { ConditionOperator, MappingRule, RuleCondition, TransformFunctionKind } from "@healthbridge/shared-types";
+import {
+  JSON_PARAM_MAX_CHARS,
+  defaultValueProblem,
+  paramFields,
+  parseConditionLiteral,
+  usesDefaultValue,
+} from "./editor.logic";
 import type { ParamField, RulePatch } from "./editor.logic";
+import { JsonValueEditor } from "./json-value-editor";
 
 export interface RuleParamChange {
   readonly key: string;
   readonly value: unknown;
 }
+
+const CONDITION_OPERATORS: readonly ConditionOperator[] = [
+  "exists",
+  "not_exists",
+  "equals",
+  "not_equals",
+  "in",
+  "not_in",
+  "matches",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+];
 
 let nextFormId = 0;
 
@@ -49,49 +70,19 @@ export function parseDefaultValue(text: string): unknown {
   }
 }
 
-function formatList(value: unknown): string {
-  return Array.isArray(value) ? value.map((item) => String(item)).join("\n") : "";
-}
-
-function parseList(text: string): string[] | undefined {
-  const items = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  return items.length > 0 ? items : undefined;
-}
-
-function formatMap(value: unknown): string {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-  return Object.entries(value as Record<string, unknown>)
-    .map(([key, entry]) => `${key}=${String(entry)}`)
-    .join("\n");
-}
-
-function parseMap(text: string): Record<string, string> | undefined {
-  const entries: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
-    const at = line.indexOf("=");
-    if (at <= 0) {
-      continue;
-    }
-    const key = line.slice(0, at).trim();
-    if (key.length > 0) {
-      entries[key] = line.slice(at + 1).trim();
-    }
-  }
-  return Object.keys(entries).length > 0 ? entries : undefined;
-}
-
 /**
  * Edits one mapping rule. The form never mutates the rule: it emits a patch (`ruleChange`) or a
  * single parameter change (`paramChange`) and the editor store applies it to the draft.
+ *
+ * Conditions are edited as whole immutable arrays: every path, operator or value change emits one
+ * `when` patch. `in`/`not_in` use the bounded JSON editor with the `scalar-array` shape, and a
+ * `matches` value shows an inline hint when the regular expression cannot be parsed (the text is
+ * still emitted; the server remains authoritative).
  */
 @Component({
   selector: "hb-rule-form",
   standalone: true,
+  imports: [JsonValueEditor],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form class="rule-form" (submit)="$event.preventDefault()" [attr.aria-label]="'Rule ' + rule().id">
@@ -136,13 +127,19 @@ function parseMap(text: string): Record<string, string> | undefined {
             autocomplete="off"
             spellcheck="false"
             [id]="id('default')"
-            [attr.aria-describedby]="id('default-help')"
+            [attr.maxlength]="maxDefaultChars"
+            [attr.aria-invalid]="defaultProblem() === null ? null : 'true'"
+            [attr.aria-describedby]="defaultDescribedBy()"
             [value]="defaultText()"
             (input)="ruleChange.emit({ defaultValue: parseDefault($event) })"
           />
           <p class="meta" [id]="id('default-help')">
-            Plain text is stored as text. Numbers, true, false, null and JSON are stored with their type.
+            Plain text is stored as text. Numbers, true, false, null and JSON are stored with their type. At most 10,000
+            characters.
           </p>
+          @if (defaultProblem(); as problem) {
+            <p class="meta" role="alert" [id]="id('default-error')">{{ problem }}</p>
+          }
         </div>
       }
 
@@ -164,26 +161,22 @@ function parseMap(text: string): Record<string, string> | undefined {
                   </label>
                 }
                 @case ("string-list") {
-                  <label [for]="id('p-' + field.key)">{{ field.label }} (one per line)</label>
-                  <textarea
-                    rows="3"
-                    spellcheck="false"
-                    [id]="id('p-' + field.key)"
-                    [attr.aria-describedby]="field.help ? id('help-' + field.key) : null"
-                    [value]="listText(field.key)"
-                    (input)="paramChange.emit({ key: field.key, value: parseList($event) })"
-                  ></textarea>
+                  <hb-json-value-editor
+                    [label]="field.label"
+                    shape="string-list"
+                    [value]="param(field.key)"
+                    [contextKey]="rule().id + ':param:' + field.key"
+                    (valueChange)="paramChange.emit({ key: field.key, value: $event })"
+                  />
                 }
                 @case ("string-map") {
-                  <label [for]="id('p-' + field.key)">{{ field.label }} (one key=value per line)</label>
-                  <textarea
-                    rows="3"
-                    spellcheck="false"
-                    [id]="id('p-' + field.key)"
-                    [attr.aria-describedby]="field.help ? id('help-' + field.key) : null"
-                    [value]="mapText(field.key)"
-                    (input)="paramChange.emit({ key: field.key, value: parseMap($event) })"
-                  ></textarea>
+                  <hb-json-value-editor
+                    [label]="field.label"
+                    shape="string-map"
+                    [value]="param(field.key)"
+                    [contextKey]="rule().id + ':param:' + field.key"
+                    (valueChange)="paramChange.emit({ key: field.key, value: $event })"
+                  />
                 }
                 @case ("number") {
                   <label [for]="id('p-' + field.key)">{{ field.label }}</label>
@@ -220,6 +213,80 @@ function parseMap(text: string): Record<string, string> | undefined {
         </fieldset>
       }
 
+      <fieldset class="params">
+        <legend>Conditions</legend>
+        <p class="meta">All conditions must hold for the rule to run.</p>
+        @if ((rule().when ?? []).length === 0) {
+          <p class="meta">This rule always runs.</p>
+        } @else {
+          <ul>
+            @for (condition of rule().when ?? []; track $index; let i = $index) {
+              <li style="margin-bottom: var(--space-3)">
+                <div class="grid cols-3">
+                  <div class="field">
+                    <label [for]="id('cond-path-' + i)">Condition {{ i + 1 }} path</label>
+                    <input
+                      type="text"
+                      autocomplete="off"
+                      spellcheck="false"
+                      [id]="id('cond-path-' + i)"
+                      [value]="condition.path"
+                      (input)="updateCondition(i, { path: value($event) })"
+                    />
+                  </div>
+                  <div class="field">
+                    <label [for]="id('cond-op-' + i)">Condition {{ i + 1 }} operator</label>
+                    <select [id]="id('cond-op-' + i)" (change)="updateCondition(i, { op: operatorOf($event) })">
+                      @for (operator of operators; track operator) {
+                        <option [value]="operator" [selected]="operator === condition.op">{{ operator }}</option>
+                      }
+                    </select>
+                  </div>
+                  <div class="field">
+                    @if (condition.op === "exists" || condition.op === "not_exists") {
+                      <p class="meta">No value is needed for this operator.</p>
+                    } @else if (condition.op === "in" || condition.op === "not_in") {
+                      <hb-json-value-editor
+                        [label]="'Condition ' + (i + 1) + ' values'"
+                        shape="scalar-array"
+                        [value]="condition.value"
+                        [contextKey]="rule().id + ':when:' + i + ':' + condition.op"
+                        (valueChange)="updateCondition(i, { value: $event })"
+                      />
+                    } @else if (condition.op === "matches") {
+                      <label [for]="id('cond-value-' + i)">Condition {{ i + 1 }} pattern</label>
+                      <input
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        [id]="id('cond-value-' + i)"
+                        [value]="conditionValueText(condition.value)"
+                        (input)="updateConditionText(i, $event)"
+                      />
+                      @if (regexInvalid(condition.value)) {
+                        <p class="meta" role="alert">Invalid regular expression.</p>
+                      }
+                    } @else {
+                      <label [for]="id('cond-value-' + i)">Condition {{ i + 1 }} value</label>
+                      <input
+                        type="text"
+                        autocomplete="off"
+                        spellcheck="false"
+                        [id]="id('cond-value-' + i)"
+                        [value]="conditionValueText(condition.value)"
+                        (input)="updateConditionLiteral(i, $event)"
+                      />
+                    }
+                  </div>
+                </div>
+                <button class="small" type="button" (click)="removeCondition(i)">Remove condition {{ i + 1 }}</button>
+              </li>
+            }
+          </ul>
+        }
+        <button class="small" type="button" (click)="addCondition()">Add condition</button>
+      </fieldset>
+
       <div class="field">
         <label>
           <input
@@ -250,14 +317,22 @@ export class RuleForm {
   public readonly paramChange = output<RuleParamChange>();
 
   protected readonly transforms: readonly TransformFunctionKind[] = MAPPING_TRANSFORM_KINDS;
+  protected readonly operators: readonly ConditionOperator[] = CONDITION_OPERATORS;
+  protected readonly maxDefaultChars = JSON_PARAM_MAX_CHARS;
   protected readonly fields = computed<readonly ParamField[]>(() => paramFields(this.rule().transform));
   protected readonly showDefault = computed(() => usesDefaultValue(this.rule().transform));
   protected readonly defaultText = computed(() => formatDefaultValue(this.rule().defaultValue));
+  protected readonly defaultProblem = computed(() => defaultValueProblem(this.rule().defaultValue));
 
   private readonly prefix = `rule-form-${nextFormId++}`;
 
   protected id(part: string): string {
     return `${this.prefix}-${part}`;
+  }
+
+  protected defaultDescribedBy(): string {
+    const help = this.id("default-help");
+    return this.defaultProblem() === null ? help : `${help} ${this.id("default-error")}`;
   }
 
   protected value(event: Event): string {
@@ -270,6 +345,10 @@ export class RuleForm {
 
   protected transformOf(event: Event): TransformFunctionKind {
     return inputValue(event) as TransformFunctionKind;
+  }
+
+  protected operatorOf(event: Event): ConditionOperator {
+    return inputValue(event) as ConditionOperator;
   }
 
   protected nonEmpty(event: Event): string | undefined {
@@ -290,14 +369,6 @@ export class RuleForm {
     return value === undefined || value === null ? "" : String(value);
   }
 
-  protected listText(key: string): string {
-    return formatList(this.param(key));
-  }
-
-  protected mapText(key: string): string {
-    return formatMap(this.param(key));
-  }
-
   protected parseText(event: Event): string | undefined {
     const text = inputValue(event);
     return text.length > 0 ? text : undefined;
@@ -312,11 +383,45 @@ export class RuleForm {
     return Number.isFinite(parsed) ? parsed : undefined;
   }
 
-  protected parseList(event: Event): string[] | undefined {
-    return parseList(inputValue(event));
+  /** A condition value as editable text: strings stay literal, other JSON keeps its compact form. */
+  protected conditionValueText(value: unknown): string {
+    if (value === undefined) return "";
+    return typeof value === "string" ? value : (JSON.stringify(value) ?? "");
   }
 
-  protected parseMap(event: Event): Record<string, string> | undefined {
-    return parseMap(inputValue(event));
+  protected regexInvalid(value: unknown): boolean {
+    if (typeof value !== "string" || value.length === 0) return false;
+    try {
+      new RegExp(value);
+      return false;
+    } catch {
+      return true;
+    }
+  }
+
+  protected addCondition(): void {
+    const added: RuleCondition = { path: "", op: "equals" };
+    this.ruleChange.emit({ when: [...(this.rule().when ?? []), added] });
+  }
+
+  protected removeCondition(index: number): void {
+    const rows = (this.rule().when ?? []).filter((_condition, at) => at !== index);
+    this.ruleChange.emit({ when: rows.length > 0 ? rows : undefined });
+  }
+
+  protected updateCondition(index: number, patch: Partial<RuleCondition>): void {
+    const rows = (this.rule().when ?? []).map((condition, at) =>
+      at === index ? { ...condition, ...patch } : condition,
+    );
+    this.ruleChange.emit({ when: rows.length > 0 ? rows : undefined });
+  }
+
+  protected updateConditionText(index: number, event: Event): void {
+    const text = inputValue(event);
+    this.updateCondition(index, { value: text.length > 0 ? text : undefined });
+  }
+
+  protected updateConditionLiteral(index: number, event: Event): void {
+    this.updateCondition(index, { value: parseConditionLiteral(inputValue(event)) });
   }
 }

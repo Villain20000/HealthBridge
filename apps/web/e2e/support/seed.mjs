@@ -2,9 +2,10 @@
  * Seed data for the end-to-end suite.
  *
  * Everything is created through the public API at the start of a run: a workspace, two CSV
- * assets, two mappings (one reserved for the editor specs) and a completed run. Tests therefore
- * assert against data the server really produced — there is no fixture JSON on disk describing
- * a UI that was never called.
+ * assets, two mappings (one reserved for the editor specs), a second version of the run mapping
+ * with one extra rule (so the editor's v1→v2 diff compares real published versions) and two
+ * completed runs. Tests therefore assert against data the server really produced — there is no
+ * fixture JSON on disk describing a UI that was never called.
  *
  * Output: `apps/web/e2e/.state.json` (workspace key, ids, base URL), read-only for the specs.
  */
@@ -37,6 +38,16 @@ const MAPPING_SPEC = {
     { id: "r4", sourcePath: "given_name", targetPath: "name.0.given.0", transform: "trim" },
     { id: "r5", sourcePath: "sex", targetPath: "gender", transform: "format_gender_fhir" },
     { id: "r6", sourcePath: "birth_date", targetPath: "birthDate", transform: "parse_date_iso" },
+  ],
+};
+
+/** The run mapping's second published version: same spec plus one extra rule. */
+const MAPPING_V2_SPEC = {
+  ...MAPPING_SPEC,
+  version: "1.0.1",
+  rules: [
+    ...MAPPING_SPEC.rules,
+    { id: "r7", sourcePath: "given_name", targetPath: "name.0.given.1", transform: "uppercase" },
   ],
 };
 
@@ -124,6 +135,22 @@ async function main() {
     },
   });
 
+  // A second version of the run mapping, under the same name, so the editor's version diff
+  // compares two real published versions. The runs below still pin the v1 mapping id.
+  await call(`/mappings/${mapping.mapping.name}/draft`, {
+    method: "PUT",
+    key,
+    body: { spec: MAPPING_V2_SPEC, revision: 0, baseVersion: 1 },
+  });
+  const { payload: publishedV2 } = await call(`/mappings/${mapping.mapping.name}/publish`, {
+    method: "POST",
+    key,
+    body: { revision: 1 },
+  });
+  if (publishedV2.mapping?.version !== 2) {
+    throw new Error(`expected mapping v2 to publish as version 2, got ${publishedV2.mapping?.version}`);
+  }
+
   const { payload: submitted } = await call("/runs", {
     method: "POST",
     key,
@@ -158,6 +185,8 @@ async function main() {
     emptyAssetId: emptyAsset.asset.id,
     mappingId: mapping.mapping.id,
     mappingName: mapping.mapping.name,
+    mappingVersion2Id: publishedV2.mapping.id,
+    mappingVersion2Version: 2,
     editorMappingId: editorMapping.mapping.id,
     editorMappingName: editorMapping.mapping.name,
     runId: run.id,

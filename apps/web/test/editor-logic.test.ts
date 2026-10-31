@@ -9,6 +9,8 @@ import {
   canRedo,
   canUndo,
   createHistory,
+  defaultValueProblem,
+  formatJsonParam,
   hasBlockingIssue,
   isDirty,
   localChecks,
@@ -16,6 +18,8 @@ import {
   newRule,
   nextRuleId,
   paramFields,
+  parseConditionLiteral,
+  parseJsonParam,
   parseSpec,
   pushEdit,
   redo,
@@ -183,7 +187,7 @@ describe("localChecks", () => {
   });
 
   it("flags missing top-level fields and an empty rule list", () => {
-    const issues = localChecks({ ...blankSpec("m") });
+    const issues = localChecks({ ...blankSpec("m"), sourceFormat: "", targetFormat: "" });
     assert.deepEqual(
       issues.map((i) => i.code),
       ["MAPPING_MISSING_FIELD", "MAPPING_MISSING_FIELD", "MAPPING_EMPTY"],
@@ -233,5 +237,159 @@ describe("parseSpec", () => {
     assert.equal(parseSpec("x"), null);
     assert.equal(parseSpec({ rules: "nope" }), null);
     assert.equal(parseSpec({ rules: [1] }), null);
+  });
+});
+
+describe("blankSpec", () => {
+  it("starts with the plan's default formats and no rules", () => {
+    assert.deepEqual(blankSpec("lab"), {
+      id: "lab",
+      name: "lab",
+      version: "1.0.0",
+      sourceFormat: "auto",
+      targetFormat: "fhir-r4",
+      rules: [],
+    });
+  });
+});
+
+function parseError(result: ReturnType<typeof parseJsonParam>): string {
+  assert.equal(result.ok, false);
+  return result.ok ? "" : result.error;
+}
+
+describe("parseJsonParam", () => {
+  it("treats empty text as no value", () => {
+    assert.deepEqual(parseJsonParam("", "string-list"), { ok: true, value: undefined });
+    assert.deepEqual(parseJsonParam("  \n\t", "string-map"), { ok: true, value: undefined });
+  });
+
+  it("rejects invalid JSON", () => {
+    assert.equal(parseError(parseJsonParam("{", "string-list")), "Invalid JSON.");
+  });
+
+  it("rejects text over 10,000 characters before parsing", () => {
+    const overLimit = `["${"x".repeat(9_999)}"]`;
+    assert.equal(overLimit.length, 10_003);
+    assert.equal(parseError(parseJsonParam(overLimit, "scalar-array")), "JSON is too large (limit 10,000 characters).");
+    assert.equal(parseError(parseJsonParam("x".repeat(10_000), "scalar-array")), "Invalid JSON.");
+  });
+
+  it("accepts a string list", () => {
+    assert.deepEqual(parseJsonParam('["a", "b"]', "string-list"), { ok: true, value: ["a", "b"] });
+  });
+
+  it("rejects a non-array and non-string string-list items", () => {
+    assert.match(parseError(parseJsonParam('{"a":"b"}', "string-list")), /array of non-empty strings/);
+    assert.match(parseError(parseJsonParam('["a", 1]', "string-list")), /non-empty string/);
+    assert.match(parseError(parseJsonParam('["a", ""]', "string-list")), /non-empty string/);
+  });
+
+  it("caps a string list at 100 items", () => {
+    const hundred = JSON.stringify(Array.from({ length: 100 }, (_, index) => `p${index}`));
+    assert.deepEqual(parseJsonParam(hundred, "string-list").ok, true);
+    const over = JSON.stringify(Array.from({ length: 101 }, (_, index) => `p${index}`));
+    assert.match(parseError(parseJsonParam(over, "string-list")), /at most 100 items/);
+  });
+
+  it("accepts a string map", () => {
+    assert.deepEqual(parseJsonParam('{"M":"male","F":"female"}', "string-map"), {
+      ok: true,
+      value: { M: "male", F: "female" },
+    });
+  });
+
+  it("rejects arrays, null and non-string values for a string map", () => {
+    assert.match(parseError(parseJsonParam('["a"]', "string-map")), /object whose values are strings/);
+    assert.match(parseError(parseJsonParam("null", "string-map")), /object whose values are strings/);
+    assert.match(parseError(parseJsonParam('{"a": 1}', "string-map")), /Every value must be a string/);
+  });
+
+  it("caps a string map at 100 keys", () => {
+    const entries = Array.from({ length: 100 }, (_, index) => [`k${index}`, "v"] as const);
+    assert.equal(parseJsonParam(JSON.stringify(Object.fromEntries(entries)), "string-map").ok, true);
+    const over = [...entries, ["k100", "v"] as const];
+    assert.match(
+      parseError(parseJsonParam(JSON.stringify(Object.fromEntries(over)), "string-map")),
+      /at most 100 keys/,
+    );
+  });
+
+  it("accepts a scalar array", () => {
+    assert.deepEqual(parseJsonParam('["a", 1, true]', "scalar-array"), { ok: true, value: ["a", 1, true] });
+  });
+
+  it("rejects null and object items in a scalar array", () => {
+    assert.match(parseError(parseJsonParam('["a", null]', "scalar-array")), /finite number or boolean/);
+    assert.match(parseError(parseJsonParam('[{"a": 1}]', "scalar-array")), /finite number or boolean/);
+    assert.match(parseError(parseJsonParam('{"a": 1}', "scalar-array")), /array of strings/);
+  });
+
+  it("caps a scalar array at 100 items", () => {
+    assert.equal(
+      parseJsonParam(JSON.stringify(Array.from({ length: 100 }, (_, index) => index)), "scalar-array").ok,
+      true,
+    );
+    assert.match(
+      parseError(parseJsonParam(JSON.stringify(Array.from({ length: 101 }, (_, index) => index)), "scalar-array")),
+      /at most 100 items/,
+    );
+  });
+});
+
+describe("formatJsonParam", () => {
+  it("renders nothing for undefined and pretty JSON otherwise", () => {
+    assert.equal(formatJsonParam(undefined), "");
+    assert.equal(formatJsonParam({ a: 1 }), '{\n  "a": 1\n}');
+    assert.equal(formatJsonParam(["a", 2]), '[\n  "a",\n  2\n]');
+  });
+});
+
+describe("parseConditionLiteral", () => {
+  it("treats empty text as no value", () => {
+    assert.equal(parseConditionLiteral(""), undefined);
+    assert.equal(parseConditionLiteral("   "), undefined);
+  });
+
+  it("keeps the JSON type of valid literals", () => {
+    assert.equal(parseConditionLiteral("3"), 3);
+    assert.equal(parseConditionLiteral("true"), true);
+    assert.equal(parseConditionLiteral("null"), null);
+    assert.deepEqual(parseConditionLiteral(' ["a", 1] '), ["a", 1]);
+  });
+
+  it("falls back to the original text when JSON parsing fails", () => {
+    assert.equal(parseConditionLiteral(" abc "), " abc ");
+    assert.equal(parseConditionLiteral("not json"), "not json");
+  });
+});
+
+describe("defaultValueProblem", () => {
+  const message = "Invalid JSON. Plain text cannot start with { or [.";
+
+  it("flags text that starts like JSON but does not parse", () => {
+    assert.equal(defaultValueProblem("{"), message);
+    assert.equal(defaultValueProblem("{not json"), message);
+    assert.equal(defaultValueProblem("  [1, 2"), message);
+    assert.equal(defaultValueProblem(" [oops] "), message);
+  });
+
+  it("accepts valid JSON object and array text", () => {
+    assert.equal(defaultValueProblem('{"a":1}'), null);
+    assert.equal(defaultValueProblem(' {"a": 1} '), null);
+    assert.equal(defaultValueProblem("[1, 2]"), null);
+  });
+
+  it("accepts plain text that does not look like JSON", () => {
+    assert.equal(defaultValueProblem("unknown"), null);
+    assert.equal(defaultValueProblem(""), null);
+    assert.equal(defaultValueProblem("42"), null);
+  });
+
+  it("ignores non-string values", () => {
+    assert.equal(defaultValueProblem(undefined), null);
+    assert.equal(defaultValueProblem(null), null);
+    assert.equal(defaultValueProblem({ a: 1 }), null);
+    assert.equal(defaultValueProblem(3), null);
   });
 });
