@@ -57,4 +57,27 @@ test.describe("accessibility", () => {
     // The table keeps its own scroll container rather than stretching the page.
     await expect(page.locator(".table-wrap").first()).toBeVisible();
   });
+
+  test("mapping editor has no serious WCAG 2.2 AA violations", async ({ page, state }) => {
+    await signIn(page, state.key);
+    await clientNavigate(page, `/studio/editor/${state.editorMappingName}`);
+    await expect(page.getByRole("form", { name: "Rule r1" })).toBeVisible();
+
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag22aa"]).analyze();
+    expect(results.violations.filter((violation) => ["serious", "critical"].includes(violation.impact ?? ""))).toEqual(
+      [],
+    );
+  });
+
+  test("mapping editor survives a 390 px viewport without horizontal page overflow", async ({ page, state }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signIn(page, state.key);
+    await clientNavigate(page, `/studio/editor/${state.editorMappingName}`);
+    await expect(page.getByRole("form", { name: "Rule r1" })).toBeVisible();
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
 });

@@ -126,8 +126,12 @@ src/app/
                connect, dashboard, runs, run-detail, assets, mappings, keys, audit, studio
 ```
 
-The Studio (`features/studio/`) contains the landing screen and the stored-trace debugger; the
-debugger reads through a page-scoped store and never opens a stream.
+The Studio (`features/studio/`) contains the landing screen, the stored-trace debugger and the
+mapping editor (`features/studio/editor/`). The debugger reads through a page-scoped store and
+never opens a stream. The editor's `MappingEditorStore` is also page-scoped: it owns the draft,
+debounced autosave (800 ms), undo/redo, 409 `DRAFT_CONFLICT` handling, previews and publishing,
+and is discarded when the operator leaves the page. A route guard asks before leaving with
+unsaved changes.
 
 Conventions that keep the Studio additive:
 
@@ -156,11 +160,12 @@ Nothing about the current routes has to be rewritten.
 | API integration | `npm test` | Includes the 413/`PAYLOAD_TOO_LARGE` and `INVALID_JSON` envelope regressions found by the console work |
 | End-to-end | `npm run test:e2e` | Playwright, Chromium, real API + real proxy; console, Studio and stored-trace debugger coverage |
 | End-to-end (containers) | `E2E_BASE_URL=http://127.0.0.1:4200 npx playwright test` (in `apps/web`) | The same suite against the composed stack |
-| Accessibility | part of E2E | axe (WCAG 2.0 A/AA and 2.2 AA tags) on connect, dashboard (both themes), debugger and run detail, keyboard navigation including run-detail tabs, 390 px overflow on console, debugger and Studio screens |
+| Accessibility | part of E2E | axe (WCAG 2.0 A/AA and 2.2 AA tags) on connect, dashboard (both themes), debugger, mapping editor and run detail, keyboard navigation including run-detail tabs, 390 px overflow on console, debugger, editor and Studio screens |
 
 E2E data is **seeded through the API** (`apps/web/e2e/support/seed.mjs`): a unique
-workspace per run, a synthetic 24-row CSV, a mapping, a completed run, a viewer key and an
-upload asset. There are no hardcoded UI fixtures and no mocked API responses, except one
+workspace per run, a synthetic 24-row CSV, two mappings (one reserved for the editor specs,
+which save drafts and publish versions), a completed run, a viewer key and an upload asset.
+There are no hardcoded UI fixtures and no mocked API responses, except one
 test that intercepts the SSE route to prove the client sends `x-api-key`, never puts the
 key in the URL, and stops on the terminal frame, and the debugger's deterministic 5,000-row
 trace fixture served through `page.route` — the only new API interception besides SSE.

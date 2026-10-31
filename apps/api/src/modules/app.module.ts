@@ -8,6 +8,7 @@ import { HealthController } from "../controllers/health.controller.js";
 import { WorkspacesController } from "../controllers/workspaces.controller.js";
 import { KeysController } from "../controllers/keys.controller.js";
 import { AssetsController } from "../controllers/assets.controller.js";
+import { MappingStudioController } from "../controllers/mapping-studio.controller.js";
 import { MappingsController } from "../controllers/mappings.controller.js";
 import { PipelinesController } from "../controllers/pipelines.controller.js";
 import { RunsController } from "../controllers/runs.controller.js";
@@ -18,6 +19,7 @@ const CONTROLLERS = [
   WorkspacesController,
   KeysController,
   AssetsController,
+  MappingStudioController,
   MappingsController,
   PipelinesController,
   RunsController,

@@ -53,6 +53,18 @@ export interface MappingRecord {
   createdBy?: string;
 }
 
+export interface MappingDraftRecord {
+  workspaceId: string;
+  name: string;
+  spec: unknown;
+  specChecksum: string;
+  revision: number;
+  baseVersion?: number;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 export interface PipelineRecord {
   id: string;
   workspaceId: string;
@@ -224,6 +236,12 @@ export interface MappingRepository {
   versions(workspaceId: string, name: string): Promise<MappingRecord[]>;
 }
 
+export interface MappingDraftRepository {
+  get(workspaceId: string, name: string): Promise<MappingDraftRecord | undefined>;
+  save(input: Omit<MappingDraftRecord, "revision">, expectedRevision: number): Promise<MappingDraftRecord>;
+  delete(workspaceId: string, name: string, expectedRevision?: number): Promise<boolean>;
+}
+
 export interface PipelineRepository {
   create(pipeline: PipelineRecord): Promise<PipelineRecord>;
   findById(workspaceId: string, id: string): Promise<PipelineRecord | undefined>;
@@ -258,6 +276,7 @@ export interface Repositories {
   apiKeys: ApiKeyStore;
   assets: AssetRepository;
   mappings: MappingRepository;
+  mappingDrafts: MappingDraftRepository;
   pipelines: PipelineRepository;
   runs: RunRepository;
   audit: AuditRepository;

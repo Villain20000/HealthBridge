@@ -4,6 +4,7 @@ import {
   MySqlAssetRepository,
   MySqlAuditRepository,
   MySqlIdempotencyStore,
+  MySqlMappingDraftRepository,
   MySqlMappingRepository,
   MySqlPipelineRepository,
   MySqlRunRepository,
@@ -114,6 +115,90 @@ describe("mysql repositories: tenant scoping", () => {
     assert.ok(insert);
     assert.match(insert!.sql, /workspace_id/);
     assert.equal(placeholders(insert!.sql), insert!.params.length);
+  });
+
+  test("mapping draft statements are scoped, optimistic and fully bound", async () => {
+    const db = new RecordingSqlConnection();
+    db.handlers.push({
+      match: /FROM mapping_drafts WHERE workspace_id = \? AND name = \?/,
+      rows: [
+        {
+          workspace_id: workspaceId,
+          name: "patient",
+          spec: { rules: [] },
+          spec_checksum: `sha256:${"f".repeat(64)}`,
+          revision: 2,
+          base_version: 1,
+          created_at: "2026-05-01 09:00:00.000",
+          updated_at: "2026-05-02 09:00:00.000",
+          updated_by: "key_editor",
+        },
+      ],
+    });
+    const repo = new MySqlMappingDraftRepository(db);
+    const input = {
+      workspaceId,
+      name: "patient",
+      spec: { rules: [{ id: "r1" }] },
+      specChecksum: `sha256:${"f".repeat(64)}`,
+      createdAt: "2026-05-01T09:00:00.000Z",
+      updatedAt: "2026-05-01T09:00:00.000Z",
+    };
+
+    await repo.get(workspaceId, "patient");
+    await repo.save(input, 0);
+    await repo.save({ ...input, baseVersion: 2, updatedAt: "2026-05-02T09:00:00.000Z" }, 1);
+    await repo.delete(workspaceId, "patient");
+    await repo.delete(workspaceId, "patient", 2);
+
+    const statements = db.statementsFor("mapping_drafts");
+    assert.equal(statements.length, 6);
+
+    for (const statement of statements) {
+      assert.equal(placeholders(statement.sql), statement.params.length, `placeholder mismatch: ${statement.sql}`);
+      assert.ok(!statement.sql.includes(workspaceId), "workspace id must never be interpolated");
+    }
+
+    const selects = statements.filter((statement) => statement.sql.startsWith("SELECT"));
+    assert.equal(selects.length, 2);
+    for (const select of selects) {
+      assert.match(select.sql, /workspace_id = \? AND name = \?$/);
+      assert.deepEqual(select.params, [workspaceId, "patient"]);
+    }
+
+    const insert = statements.find((statement) => statement.sql.startsWith("INSERT INTO mapping_drafts"));
+    assert.ok(insert);
+    assert.match(
+      insert!.sql,
+      /INSERT INTO mapping_drafts \(workspace_id, name, spec, spec_checksum, revision, base_version, created_at, updated_at, updated_by\)/,
+    );
+    assert.equal(insert!.params[0], workspaceId, "the insert must persist the tenant");
+    assert.equal(insert!.params[4], null, "an absent baseVersion is bound as NULL");
+
+    const update = statements.find((statement) => statement.sql.startsWith("UPDATE mapping_drafts"));
+    assert.ok(update);
+    assert.match(update!.sql, /revision = revision \+ 1/);
+    assert.match(update!.sql, /WHERE workspace_id = \? AND name = \? AND revision = \?$/);
+    assert.ok(update!.params.includes(workspaceId));
+    assert.equal(update!.params.at(-1), 1, "the expected revision is a bound parameter");
+
+    const deletes = statements.filter((statement) => statement.sql.startsWith("DELETE FROM mapping_drafts"));
+    assert.equal(deletes.length, 2);
+    assert.match(deletes[0].sql, /WHERE workspace_id = \? AND name = \?$/);
+    assert.deepEqual(deletes[0].params, [workspaceId, "patient"]);
+    assert.match(deletes[1].sql, /WHERE workspace_id = \? AND name = \? AND revision = \?$/);
+    assert.deepEqual(deletes[1].params, [workspaceId, "patient", 2]);
+
+    const before = db.statements.length;
+    await assert.rejects(
+      () => repo.save(input, 1.5),
+      (error: unknown) => (error as PersistenceError).code === "INVALID_ARGUMENT",
+    );
+    await assert.rejects(
+      () => repo.delete(workspaceId, "patient", -1),
+      (error: unknown) => (error as PersistenceError).code === "INVALID_ARGUMENT",
+    );
+    assert.equal(db.statements.length, before, "invalid revisions must be rejected before SQL");
   });
 
   test("duplicate workspace slug is translated into a typed conflict", async () => {

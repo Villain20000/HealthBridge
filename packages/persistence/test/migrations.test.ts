@@ -176,7 +176,16 @@ describe("schema (DDL) invariants", () => {
   });
 
   test("every tenant-owned table is scoped by workspace_id", () => {
-    const tenantTables = ["api_keys", "assets", "mappings", "pipelines", "runs", "audit_events", "idempotency_keys"];
+    const tenantTables = [
+      "api_keys",
+      "assets",
+      "mappings",
+      "mapping_drafts",
+      "pipelines",
+      "runs",
+      "audit_events",
+      "idempotency_keys",
+    ];
     for (const table of tenantTables) {
       const statement = MIGRATIONS.flatMap((migration) => migration.statements).find((sql) =>
         sql.includes(`CREATE TABLE IF NOT EXISTS ${table} `),
@@ -189,6 +198,23 @@ describe("schema (DDL) invariants", () => {
         `${table} must reference its workspace`,
       );
     }
+  });
+
+  test("mapping drafts are keyed per workspace and name without a mapping foreign key", () => {
+    const migration = MIGRATIONS.find((entry) => entry.version === 4);
+    assert.ok(migration, "migration 4 must exist");
+    assert.equal(migration!.name, "mapping_drafts");
+
+    const ddl = migration!.statements.join("\n");
+    assert.match(ddl, /CREATE TABLE IF NOT EXISTS mapping_drafts/);
+    assert.match(ddl, /PRIMARY KEY \(workspace_id, name\)/);
+    assert.match(ddl, /spec_checksum CHAR\(71\)/);
+    assert.match(ddl, /revision INT NOT NULL/);
+    assert.match(
+      ddl,
+      /fk_mapping_drafts_workspace FOREIGN KEY \(workspace_id\)\s+REFERENCES workspaces \(id\) ON DELETE CASCADE/,
+    );
+    assert.doesNotMatch(ddl, /REFERENCES mappings/, "a draft may predate version 1, so it must not reference mappings");
   });
 
   test("runs are uniquely idempotent per workspace", () => {

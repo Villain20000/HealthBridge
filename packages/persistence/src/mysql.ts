@@ -5,6 +5,8 @@ import {
   AuditRepository,
   IdempotencyRecord,
   IdempotencyStore,
+  MappingDraftRecord,
+  MappingDraftRepository,
   MappingRecord,
   MappingRepository,
   Page,
@@ -65,6 +67,12 @@ function isDuplicateKey(error: unknown): boolean {
   return candidate?.code === "ER_DUP_ENTRY" || candidate?.errno === 1062;
 }
 
+function assertExpectedRevision(expectedRevision: number): void {
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+    throw new PersistenceError("INVALID_ARGUMENT", "expectedRevision must be a non-negative integer.");
+  }
+}
+
 function pageParams(request: PageRequest & { status?: RunStatus }): {
   limit: number;
   cursor?: { createdAt: string; id: string };
@@ -90,6 +98,8 @@ const ASSET_COLUMNS =
   "id, workspace_id, storage_key, checksum, filename, content_type, size_bytes, domain, source_format, metadata, created_at, created_by";
 const MAPPING_COLUMNS =
   "id, workspace_id, name, version, spec, spec_checksum, source_format, target_format, target_resource_type, created_at, created_by";
+const MAPPING_DRAFT_COLUMNS =
+  "workspace_id, name, spec, spec_checksum, revision, base_version, created_at, updated_at, updated_by";
 const PIPELINE_COLUMNS = "id, workspace_id, name, mapping_id, config, created_at, created_by";
 const RUN_COLUMNS =
   "id, workspace_id, mapping_id, pipeline_id, asset_id, status, idempotency_key, request_checksum, engine_version, " +
@@ -324,6 +334,92 @@ export class MySqlMappingRepository implements MappingRepository {
       [workspaceId, name],
     );
     return rows.map(mapMapping);
+  }
+}
+
+export class MySqlMappingDraftRepository implements MappingDraftRepository {
+  constructor(private readonly db: SqlExecutor) {}
+
+  public async get(workspaceId: string, name: string): Promise<MappingDraftRecord | undefined> {
+    const rows = await this.db.query(
+      `SELECT ${MAPPING_DRAFT_COLUMNS} FROM mapping_drafts WHERE workspace_id = ? AND name = ?`,
+      [workspaceId, name],
+    );
+    return rows[0] ? mapMappingDraft(rows[0]) : undefined;
+  }
+
+  public async save(
+    input: Omit<MappingDraftRecord, "revision">,
+    expectedRevision: number,
+  ): Promise<MappingDraftRecord> {
+    assertExpectedRevision(expectedRevision);
+
+    if (expectedRevision === 0) {
+      try {
+        await this.db.execute(
+          `INSERT INTO mapping_drafts (workspace_id, name, spec, spec_checksum, revision, base_version, created_at, updated_at, updated_by)
+           VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          [
+            input.workspaceId,
+            input.name,
+            json(input.spec),
+            input.specChecksum,
+            input.baseVersion ?? null,
+            toSqlDate(new Date(input.createdAt)),
+            toSqlDate(new Date(input.updatedAt)),
+            input.updatedBy ?? null,
+          ],
+        );
+      } catch (error) {
+        if (isDuplicateKey(error)) {
+          throw new PersistenceError("CONFLICT", `Draft '${input.name}' already exists.`);
+        }
+        throw error;
+      }
+      return { ...input, revision: 1 };
+    }
+
+    const result = await this.db.execute(
+      `UPDATE mapping_drafts SET spec = ?, spec_checksum = ?, revision = revision + 1,
+         base_version = ?, updated_at = ?, updated_by = ?
+       WHERE workspace_id = ? AND name = ? AND revision = ?`,
+      [
+        json(input.spec),
+        input.specChecksum,
+        input.baseVersion ?? null,
+        toSqlDate(new Date(input.updatedAt)),
+        input.updatedBy ?? null,
+        input.workspaceId,
+        input.name,
+        expectedRevision,
+      ],
+    );
+    if (result.affectedRows === 0) {
+      throw new PersistenceError(
+        "CONFLICT",
+        `Draft '${input.name}' is not at revision ${expectedRevision}; reload and retry.`,
+      );
+    }
+
+    const stored = await this.get(input.workspaceId, input.name);
+    if (!stored) {
+      throw new PersistenceError("CONFLICT", `Draft '${input.name}' disappeared while it was being updated.`);
+    }
+    return stored;
+  }
+
+  public async delete(workspaceId: string, name: string, expectedRevision?: number): Promise<boolean> {
+    if (expectedRevision !== undefined) assertExpectedRevision(expectedRevision);
+
+    const result =
+      expectedRevision === undefined
+        ? await this.db.execute(`DELETE FROM mapping_drafts WHERE workspace_id = ? AND name = ?`, [workspaceId, name])
+        : await this.db.execute(`DELETE FROM mapping_drafts WHERE workspace_id = ? AND name = ? AND revision = ?`, [
+            workspaceId,
+            name,
+            expectedRevision,
+          ]);
+    return result.affectedRows > 0;
   }
 }
 
@@ -736,6 +832,20 @@ function mapMapping(row: Record<string, unknown>): MappingRecord {
   };
 }
 
+function mapMappingDraft(row: Record<string, unknown>): MappingDraftRecord {
+  return {
+    workspaceId: String(row.workspace_id),
+    name: String(row.name),
+    spec: parseJson(row.spec),
+    specChecksum: String(row.spec_checksum),
+    revision: Number(row.revision),
+    baseVersion: row.base_version === null || row.base_version === undefined ? undefined : Number(row.base_version),
+    createdAt: fromSqlDate(row.created_at) ?? new Date().toISOString(),
+    updatedAt: fromSqlDate(row.updated_at) ?? new Date().toISOString(),
+    updatedBy: row.updated_by ? String(row.updated_by) : undefined,
+  };
+}
+
 function mapPipeline(row: Record<string, unknown>): PipelineRecord {
   return {
     id: String(row.id),
@@ -805,6 +915,7 @@ export async function createMySqlRepositories(
     apiKeys: new MySqlApiKeyStore(connection),
     assets: new MySqlAssetRepository(connection),
     mappings: new MySqlMappingRepository(connection),
+    mappingDrafts: new MySqlMappingDraftRepository(connection),
     pipelines: new MySqlPipelineRepository(connection),
     runs: new MySqlRunRepository(connection),
     audit: new MySqlAuditRepository(connection),

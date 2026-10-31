@@ -217,6 +217,12 @@ one object; the `metadata` row is what is tenant-scoped.
 | GET | `/mappings` | `mappings:read` |
 | GET | `/mappings/:id` | `mappings:read` |
 | GET | `/mappings/:name/versions` | `mappings:read` |
+| POST | `/mappings/preview` | `mappings:write` |
+| GET | `/mappings/:name/draft` | `mappings:read` |
+| PUT | `/mappings/:name/draft` | `mappings:write` |
+| DELETE | `/mappings/:name/draft?revision=` | `mappings:write` |
+| POST | `/mappings/:name/publish` | `mappings:write` |
+| GET | `/mappings/:name/diff?from=&to=` | `mappings:read` |
 | POST | `/pipelines` | `pipelines:write` |
 | GET | `/pipelines` | `pipelines:read` |
 | GET | `/pipelines/:id` | `pipelines:read` |
@@ -224,6 +230,30 @@ one object; the `metadata` row is what is tenant-scoped.
 Posting an existing mapping `name` creates the next version. Versions are
 immutable and a run references a mapping **id**, so editing a mapping cannot
 silently change what an old run did.
+
+#### Drafts, preview and publish
+
+The Studio editor works on a server-side **draft** of a mapping, one per workspace and mapping
+`name`. A draft is not a version: runs cannot reference it until it is published.
+
+- `GET /mappings/:name/draft` returns `{ draft, latest, validation }`. `draft` is `null` when no
+  draft exists, and `latest` is the newest published version (or `null`).
+- `PUT /mappings/:name/draft` takes `{ spec, revision, baseVersion? }`. `revision` must equal the
+  draft's current revision (`0` when there is no draft yet), otherwise the call fails with
+  `409 DRAFT_CONFLICT`. A save that does not change the spec returns the current draft without a
+  new revision or audit event. Invalid specs are stored on purpose so autosave survives
+  mid-edit; the response's `validation` lists what is still wrong.
+- `DELETE /mappings/:name/draft` returns `204`. With `?revision=` it fails with
+  `409 DRAFT_CONFLICT` when the stored revision differs, and it succeeds when there is no draft.
+- `POST /mappings/:name/publish` takes `{ revision }` and returns
+  `{ mapping, created, validation, draftRetained? }`. A stale `revision` fails with
+  `409 DRAFT_CONFLICT`, and an invalid draft fails with `MAPPING_VALIDATION_FAILED`. When the
+  latest version already has the draft's spec, nothing new is created and `created` is `false`.
+  The draft is deleted on success; `draftRetained: true` means that delete failed.
+- `POST /mappings/preview` takes `{ spec, assetId, maxRecords?, adapterId? }` and dry-runs the
+  spec against a stored asset. `maxRecords` is capped at 100. Nothing is written.
+- `GET /mappings/:name/diff` compares two specs. `from` defaults to `latest` and `to` defaults
+  to `draft`.
 
 ### Runs
 

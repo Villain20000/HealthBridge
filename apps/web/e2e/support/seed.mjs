@@ -2,8 +2,9 @@
  * Seed data for the end-to-end suite.
  *
  * Everything is created through the public API at the start of a run: a workspace, two CSV
- * assets, a mapping and a completed run. Tests therefore assert against data the server really
- * produced — there is no fixture JSON on disk describing a UI that was never called.
+ * assets, two mappings (one reserved for the editor specs) and a completed run. Tests therefore
+ * assert against data the server really produced — there is no fixture JSON on disk describing
+ * a UI that was never called.
  *
  * Output: `apps/web/e2e/.state.json` (workspace key, ids, base URL), read-only for the specs.
  */
@@ -110,6 +111,19 @@ async function main() {
     body: { name: `e2e-patient-${slug}`, spec: MAPPING_SPEC, targetResourceType: "Patient" },
   });
 
+  // A separate mapping for the editor specs: they save drafts and publish new versions, which
+  // must not change the mapping that the run and debugger specs read.
+  const editorName = `e2e-editor-${slug}`;
+  const { payload: editorMapping } = await call("/mappings", {
+    method: "POST",
+    key,
+    body: {
+      name: editorName,
+      spec: { ...MAPPING_SPEC, id: "e2e-editor", name: "E2E Editor Patient Mapping" },
+      targetResourceType: "Patient",
+    },
+  });
+
   const { payload: submitted } = await call("/runs", {
     method: "POST",
     key,
@@ -144,6 +158,8 @@ async function main() {
     emptyAssetId: emptyAsset.asset.id,
     mappingId: mapping.mapping.id,
     mappingName: mapping.mapping.name,
+    editorMappingId: editorMapping.mapping.id,
+    editorMappingName: editorMapping.mapping.name,
     runId: run.id,
     runStatus: run.status,
     secondRunId: secondRun.id,

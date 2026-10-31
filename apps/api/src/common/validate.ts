@@ -41,6 +41,26 @@ export function requireSlug(value: unknown, field: string): string {
   return slug;
 }
 
+export function requireInteger(value: unknown, field: string, options: { min?: number } = {}): number {
+  const min = options.min ?? 0;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min) {
+    throw validationFailed(`'${field}' must be an integer >= ${min}.`);
+  }
+  return value;
+}
+
+export function optionalInteger(value: unknown, field: string, options: { min?: number } = {}): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requireInteger(value, field, options);
+}
+
+/** Query-string form: `undefined` and `""` mean "not supplied". */
+export function parseOptionalInteger(value: unknown, field: string, min: number): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const numeric = typeof value === "string" ? Number(value) : value;
+  return requireInteger(numeric, field, { min });
+}
+
 export function parseLimit(value: unknown, fallback = 25, max = 100): number {
   if (value === undefined || value === "") return fallback;
   const limit = Number(value);

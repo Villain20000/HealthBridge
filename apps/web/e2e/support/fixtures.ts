@@ -23,6 +23,8 @@ export interface SeedState {
   emptyAssetId: string;
   mappingId: string;
   mappingName: string;
+  editorMappingId: string;
+  editorMappingName: string;
   runId: string;
   runStatus: string;
   secondRunId: string;

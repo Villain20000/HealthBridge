@@ -39,6 +39,10 @@ export interface ApiConfig {
     bootstrapRateLimit: { attemptsPerWindow: number; windowMs: number };
     maxStoredResultBytes: number;
     maxTracesPerRun: number;
+    /** Mapping preview: records per call, serialised response bytes, and input asset bytes. */
+    maxPreviewRecords: number;
+    maxPreviewBytes: number;
+    maxPreviewInputBytes: number;
   };
   queue: { concurrency: number; maxAttempts: number; pollIntervalMs: number; visibilityTimeoutMs: number };
   sseHeartbeatMs: number;
@@ -148,6 +152,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
       },
       maxStoredResultBytes: intFromEnv("HEALTHBRIDGE_MAX_STORED_RESULT_BYTES", 5 * 1024 * 1024, env),
       maxTracesPerRun: intFromEnv("HEALTHBRIDGE_MAX_TRACES_PER_RUN", 5000, env),
+      // Clamped at load so /healthz reports the maximum a client can actually get.
+      maxPreviewRecords: Math.min(intFromEnv("HEALTHBRIDGE_MAX_PREVIEW_RECORDS", 25, env), 100),
+      maxPreviewBytes: intFromEnv("HEALTHBRIDGE_MAX_PREVIEW_BYTES", 512 * 1024, env),
+      maxPreviewInputBytes: intFromEnv("HEALTHBRIDGE_MAX_PREVIEW_INPUT_BYTES", 8 * 1024 * 1024, env),
     },
     queue: {
       concurrency: intFromEnv("HEALTHBRIDGE_QUEUE_CONCURRENCY", 2, env),

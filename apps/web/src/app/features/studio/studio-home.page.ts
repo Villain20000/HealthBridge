@@ -108,7 +108,9 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
                 <tbody>
                   @for (mapping of mappings(); track mapping.id) {
                     <tr>
-                      <td class="mono">{{ mapping.name }}</td>
+                      <td class="mono">
+                        <a [routerLink]="['/studio/editor', mapping.name]">{{ mapping.name }}</a>
+                      </td>
                       <td>v{{ mapping.version }}</td>
                       <td class="mono">{{ mapping.targetFormat }}</td>
                     </tr>
@@ -168,8 +170,8 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
       <h2 id="studio-tools-heading">Studio tools</h2>
       <div class="grid cols-2" style="margin-top: var(--space-3)">
         <hb-planned
-          title="Mapping editor"
-          message="Draft autosave, revision conflicts, preview, publish and version diff are planned. The API has no draft endpoints yet."
+          title="Mapping version diff"
+          message="Comparing two mapping versions is planned. Draft editing, autosave, conflict handling, preview and publish are available by opening a mapping from the list above."
         />
         <hb-planned
           title="Schema explorer"

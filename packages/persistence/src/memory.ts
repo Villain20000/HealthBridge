@@ -5,6 +5,8 @@ import {
   AuditRepository,
   IdempotencyRecord,
   IdempotencyStore,
+  MappingDraftRecord,
+  MappingDraftRepository,
   MappingRecord,
   MappingRepository,
   Page,
@@ -50,6 +52,12 @@ function encode(item: { createdAt: string; id: string }): string {
 
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+function assertExpectedRevision(expectedRevision: number): void {
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+    throw new PersistenceError("INVALID_ARGUMENT", "expectedRevision must be a non-negative integer.");
+  }
 }
 
 export class InMemoryWorkspaceRepository implements WorkspaceRepository {
@@ -156,6 +164,60 @@ export class InMemoryMappingRepository implements MappingRepository {
       .filter((item) => item.workspaceId === workspaceId && item.name === name)
       .sort((a, b) => b.version - a.version)
       .map(clone);
+  }
+}
+
+export class InMemoryMappingDraftRepository implements MappingDraftRepository {
+  private readonly items = new Map<string, MappingDraftRecord>();
+
+  private keyOf(workspaceId: string, name: string): string {
+    return `${workspaceId}\u0000${name}`;
+  }
+
+  public async get(workspaceId: string, name: string): Promise<MappingDraftRecord | undefined> {
+    const found = this.items.get(this.keyOf(workspaceId, name));
+    return found ? clone(found) : undefined;
+  }
+
+  public async save(
+    input: Omit<MappingDraftRecord, "revision">,
+    expectedRevision: number,
+  ): Promise<MappingDraftRecord> {
+    assertExpectedRevision(expectedRevision);
+    const key = this.keyOf(input.workspaceId, input.name);
+    const existing = this.items.get(key);
+
+    if (expectedRevision === 0) {
+      if (existing) throw new PersistenceError("CONFLICT", `Draft '${input.name}' already exists.`);
+      const record: MappingDraftRecord = { ...clone(input), revision: 1 };
+      this.items.set(key, record);
+      return clone(record);
+    }
+
+    if (!existing || existing.revision !== expectedRevision) {
+      throw new PersistenceError(
+        "CONFLICT",
+        `Draft '${input.name}' is at revision ${existing?.revision ?? "none"}, expected ${expectedRevision}.`,
+      );
+    }
+
+    const record: MappingDraftRecord = {
+      ...clone(input),
+      revision: expectedRevision + 1,
+      createdAt: existing.createdAt,
+    };
+    this.items.set(key, record);
+    return clone(record);
+  }
+
+  public async delete(workspaceId: string, name: string, expectedRevision?: number): Promise<boolean> {
+    if (expectedRevision !== undefined) assertExpectedRevision(expectedRevision);
+    const key = this.keyOf(workspaceId, name);
+    const existing = this.items.get(key);
+    if (!existing) return false;
+    if (expectedRevision !== undefined && existing.revision !== expectedRevision) return false;
+    this.items.delete(key);
+    return true;
   }
 }
 
@@ -315,6 +377,7 @@ export function createMemoryRepositories(): Repositories {
     apiKeys: new InMemoryApiKeyStore(),
     assets: new InMemoryAssetRepository(),
     mappings: new InMemoryMappingRepository(),
+    mappingDrafts: new InMemoryMappingDraftRepository(),
     pipelines: new InMemoryPipelineRepository(),
     runs: new InMemoryRunRepository(),
     audit: new InMemoryAuditRepository(),
