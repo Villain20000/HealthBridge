@@ -63,5 +63,9 @@
     "typescript": "^5.4.0",
     "typescript-eslint": "^8.72.1",
     "yaml": "^2.8.0"
+  },
+  "overrides": {
+    "piscina": "4.9.4",
+    "tar": "7.5.22"
   }
 }
