@@ -6,8 +6,10 @@
 
 > Open-source medical data interoperability, transformation and debugging toolkit.
 >
-> **Status: developer preview (v3.2.0).** Three format adapters, a platform API with
-> persistence, authentication and an asynchronous run queue, and a working Angular
+> **Status: developer preview (v3.2.0).** Four built-in format adapters (CSV, JSON,
+> FHIR R4 JSON, FHIR NDJSON) plus 13 opt-in adapters, a platform API with
+> persistence, authentication, an asynchronous run queue (durable MySQL default, opt-in
+> BullMQ), retention enforcement and a generated OpenAPI contract, and a working Angular
 > **Operator Console** on top of it. Everything else is listed honestly in
 > [ROADMAP.md](ROADMAP.md) — this repository does not advertise features it has not implemented.
 
@@ -144,7 +146,7 @@ comes from the engine's own `TransformationResult`. The console talks only to th
 
 ### Packages
 
-All 15 library packages are named under the `@healthbridge/*` scope at version 3.2.0. They are
+All 17 library packages are named under the `@healthbridge/*` scope at version 3.2.0. They are
 built with TypeScript project references and are installable independently (not yet on npm — see
 [Packaging and releases](#packaging-and-releases)).
 
@@ -154,6 +156,8 @@ built with TypeScript project references and are installable independently (not 
 | `@healthbridge/trace-protocol` | Trace collector, redaction policy, report export |
 | `@healthbridge/core` | Adapter registry, checksum, sensitivity policy, path utilities |
 | `@healthbridge/adapters` | CSV, JSON and FHIR R4 JSON adapters (plus 13 opt-in adapters; NDJSON in `@healthbridge/fhir-ndjson`) |
+| `@healthbridge/fhir-ndjson` | FHIR NDJSON adapter (fourth built-in) |
+| `@healthbridge/client` | Typed REST client over the platform API |
 | `@healthbridge/mapping-engine` | Declarative rules, 14 deterministic transforms, chaining, opt-in cross-record context, coverage, static validation |
 | `@healthbridge/transformation-engine` | Pipeline: detect → parse → map → report |
 | `@healthbridge/fhir-r4` | FHIR R4 resource interfaces |
@@ -162,7 +166,7 @@ built with TypeScript project references and are installable independently (not 
 | `@healthbridge/sdk` | Offline façade over the engine, run bundles and replay |
 | `@healthbridge/cli` | Command-line interface |
 | `@healthbridge/auth` | API keys, roles, scopes, token-bucket rate limiting |
-| `@healthbridge/storage` | Content-addressed object storage (local filesystem, memory) |
+| `@healthbridge/storage` | Content-addressed object storage (local filesystem, memory, opt-in S3) |
 | `@healthbridge/persistence` | Workspace-scoped repositories (memory and MySQL, migrations) |
 | `@healthbridge/target-builders` | Target-format builders that turn mapped objects into valid resources |
 
@@ -765,16 +769,16 @@ offline. `/healthz` reports `persistence: "mysql"` when the database path is act
 
 ## Packaging and releases
 
-All 15 library packages declare `license`, `engines.node >= 22`, `files`, keywords and
+All 17 library packages declare `license`, `engines.node >= 22`, `files`, keywords and
 `publishConfig.access: public`, and ship their README and LICENSE. `npm run check:pack` asserts
 that each tarball actually contains `dist`, the README and the LICENSE.
 
 They are **not published to npm yet**. Until the first release, use a local checkout or
 `npm link --workspace <name>`. The release workflow
-([.github/workflows/release.yml](.github/workflows/release.yml)) runs on `v*` tags: it verifies
-the build, tests and tarballs, publishes the workspace packages with npm provenance (requires
-the `NPM_TOKEN` secret and ownership of the `@healthbridge` scope), and pushes API/web images to
-GHCR. No release has been cut from this repository yet.
+([.github/workflows/release.yml](.github/workflows/release.yml)) is manual-dispatch only: it
+builds, fully tests and packs every workspace into `dist/` tarballs uploaded as workflow
+artifacts. There is deliberately no registry publish or image push step — publishing stays
+"only with explicit authorisation". No release has been cut from this repository yet.
 
 ---
 
@@ -794,8 +798,10 @@ packages/validation          Structural FHIR validation + OperationOutcome
 packages/lineage-engine      Lineage graph builder
 packages/sdk                 @healthbridge/sdk (offline, no NestJS required)
 packages/auth                API keys, scopes, roles, rate limiting
-packages/storage             Content-addressed object storage (local fs, memory)
+packages/storage             Content-addressed object storage (local fs, memory, opt-in S3)
 packages/persistence         Workspace-scoped repositories (memory + MySQL, migrations)
+packages/client              @healthbridge/client (typed REST client)
+packages/fhir-ndjson         FHIR NDJSON adapter (fourth built-in)
 packages/cli                 @healthbridge/cli
 datasets                     Deterministic synthetic fixtures
 examples                     Runnable mapping and SDK examples
@@ -836,11 +842,20 @@ This is a developer preview. The API may change before 1.0.
 - **FHIR validation.** Structural checks only. Profile, terminology and referential-integrity
   validation are not executed; the CLI reports exactly which levels ran.
 - **Uploads.** Request bodies are buffered up to the configured limit; there is no streaming
-  upload or streaming CSV parse.
-- **API contract.** `docs/openapi.json` is committed and diffed in CI; it is not served over HTTP — `docs/api.md` remains the human-readable contract.
-- **Storage.** Local filesystem or memory by default; an S3-compatible driver exists (`S3StorageDriver`, env config) but is not yet wired into `app.context`.
-- **Retention and deletion.** Workspaces store a `retentionDays` value, but no retention job or
-  deletion endpoints exist. Remove data at the database/object-store layer.
+  upload. Streaming CSV tokenization, bounded-memory pipeline batches and SDK streaming file
+  input exist; API upload and JSON/NDJSON parse still buffer.
+- **API contract.** `docs/openapi.json` is generated from the controllers, committed and
+  drift-checked in CI (`generate-openapi --check`); it is not served over HTTP —
+  `docs/api.md` remains the human-readable contract. The generator omits the mapping-studio
+  controller and the console still hand-writes DTOs instead of consuming
+  `@healthbridge/client`.
+- **Storage.** Local filesystem or memory by default; an S3-compatible driver exists
+  (`S3StorageDriver`) and is auto-selected in `app.context` when `HEALTHBRIDGE_S3_ENDPOINT` /
+  `HEALTHBRIDGE_S3_BUCKET` are set.
+- **Retention and deletion.** `DELETE /assets/:id`, `DELETE /runs/:id` and
+  `DELETE /workspaces/current` exist with a scheduled retention sweeper
+  (`HEALTHBRIDGE_RETENTION_SWEEP_MS`, `HEALTHBRIDGE_WORKSPACE_GRACE_DAYS`); see
+  `docs/api.md` for the policy.
 - **Multi-tenancy in the console.** One workspace per session; switching workspaces means
   switching keys.
 - **Authentication for operators.** API keys only; no OIDC/BFF. The console is a single-operator
@@ -852,8 +867,9 @@ This is a developer preview. The API may change before 1.0.
 - **Queue semantics.** At-least-once delivery. Re-running is safe because runs are pure, but a
   worker can repeat work after a lease expiry.
 - **Plugins.** Unsupported/untrusted adapters run in-process without a sandbox.
-- **Frontend tests.** No component-level DOM tests; behaviour is covered by Playwright and the
-  logic layer by unit tests.
+- **Frontend tests.** A Vitest harness and two specs exist (`auth.store.spec.ts`,
+  `ui/primitives.spec.ts`) but are not yet gated in CI; behaviour is otherwise covered by
+  Playwright and the logic layer by unit tests.
 - **Compliance.** HealthBridge OS does not certify HIPAA, GDPR, MDR, FDA or any other regime,
   does not anonymise data, and must not be used for autonomous diagnosis or clinical
   decision-making.
@@ -889,9 +905,10 @@ Add the transform to `mapping-engine`, with tests and a capability-matrix update
 change. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Why not Redis/BullMQ?**
-The MySQL `run_jobs` table already provides restart safety, lease recovery and cross-replica
-claiming without another service. ADR-0004 records the decision and the conditions under which
-it would be revisited.
+The MySQL `run_jobs` table is the default because it already provides restart safety, lease
+recovery and cross-replica claiming without another service; an opt-in BullMQ driver exists
+(`HEALTHBRIDGE_REDIS_URL`) for deployments that need it. ADR-0004 records the decision and
+the conditions under which it would be revisited.
 
 **How do I report a security issue?**
 Use the [private advisory flow](https://github.com/Villain20000/HealthBridge/security/advisories/new).

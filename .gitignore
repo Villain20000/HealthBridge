@@ -9,6 +9,10 @@ coverage/
 # verification scratch
 .verify/
 
+# Generated docs site and benchmark output (reproducible via scripts)
+docs/site/
+benchmark-results/
+
 # Operator Console build and test artifacts
 apps/web/.angular/
 apps/web/playwright-report/

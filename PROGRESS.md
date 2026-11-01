@@ -4,7 +4,7 @@ Single-page status for the platform API, the Operator Console and the Studio. It
 **verified**, what is partial, and what is deliberately not built. Claims here are backed by a
 command in §7; anything without evidence is marked ⬜ or "not verified".
 
-**Snapshot:** branch `main` · HEAD `b7eccb7` · working tree clean · no remote configured
+**Snapshot:** branch `main` · HEAD `44a40a4` · remote `origin/main` (in sync after this commit) · 6 untracked paths (generated, git-ignored: `docs/site/`, `benchmark-results/`, compiled `packages/fhir-ndjson/src/*.{js,d.ts*}`)
 **Legend:** ✅ done and verified · 🟨 partial or needs owner review · ⬜ planned, not started
 
 ---
@@ -21,9 +21,15 @@ command in §7; anything without evidence is marked ⬜ or "not verified".
 | Browser-safe dependencies (B5) | ✅ | type-only imports from `@healthbridge/shared-types`; CI greps the bundle for `node:` modules |
 | **Operator Console v1** (`apps/web`) | ✅ | 8 lazy routes + 1 feature route, 34 E2E journeys, 32 unit tests, axe checks, compose E2E |
 | Console serving/proxy (`apps/web/server.mjs`) | ✅ | same-origin `/api`, SSE passthrough, piped uploads, `no-store`, CSP + security headers, request-id propagation, traversal guards |
-| **Studio M0/M1** (contracts + stored-trace debugger) | 🟨 | Landed in `5ebc7fa` outside this session; 33 E2E pass. Needs owner review before calling it done |
-| Studio M2+ (mapping editor, schema explorer, lineage, validation centre) | ⬜ | Planned cards already state this in the UI; no code |
-| Broker-backed queue (Redis/BullMQ) | ⬜ | Deliberate: durable MySQL queue is the current answer (ADR-0004); revisit when throughput demands it |
+| **Studio M0/M1** (contracts + stored-trace debugger) | ✅ | Landed in `5ebc7fa`; 33 E2E pass; superseded by the M2 work below |
+| **Studio M2** (mapping editor, draft API, live preview) | ✅ | Committed in `8203902` + `e644291` + merge `30dd443`: rule-table editor, mapping drafts/preview/publish/diff API, coverage; E2E `mapping-editor.spec.ts` |
+| Studio schema explorers, lineage view, validation centre | ✅ | Committed in `44a40a4`: `GET /assets/:id/schema`, `lineage/`, `validation-centre/` pages + E2E (`lineage.spec.ts`, `validation-centre.spec.ts`); per-run scope, no aggregate endpoints |
+| Broker-backed queue (Redis/BullMQ) | ✅ opt-in | `apps/api/src/jobs/bullmq-queue.ts` + `bullmq-queue.test.ts`; opt-in via `HEALTHBRIDGE_REDIS_URL`, MySQL queue remains the default (ADR-0004) |
+| S3-compatible storage driver | ✅ opt-in | `S3StorageDriver` + auto-selection in `app.context` when `HEALTHBRIDGE_S3_ENDPOINT`/`BUCKET` are set; local/memory remain the default |
+| Retention and deletion | ✅ | `RetentionService` + `DELETE /assets/:id`, `DELETE /runs/:id`, `DELETE /workspaces/current` + scheduled sweeper (`HEALTHBRIDGE_RETENTION_SWEEP_MS`, `HEALTHBRIDGE_WORKSPACE_GRACE_DAYS`); e2e + service tests |
+| OpenAPI document + typed client | ✅ | `apps/api/src/openapi.ts` + `generate-openapi.ts`, committed `docs/openapi.json`, drift-checked in CI (`--check`); `@healthbridge/client` typed REST client (mapping-studio/pause-resume methods still missing) |
+| Adapter wave (HL7 v2, CDA, DICOMweb, XLSX, OMOP, MySQL connector, …) | ✅ | 13 opt-in adapters + FHIR NDJSON split into `@healthbridge/fhir-ndjson` (4th built-in); conformance kit, security suite, benchmarks, docs site, release automation — see `44a40a4` |
+| Live pausable execution | ✅ | Chunked checkpoints with pause/resume (`POST /runs/:id/pause|resume`); v1 process-local, replay untouched |
 | Docker Compose demo | ✅ | mysql + api + web build, start healthy, smoke script + 64 E2E tests against containers |
 | Component-DOM (Karma/Vitest) tests | ⬜ | Logic unit-tested, UI covered by E2E; no TestBed layer. Toolchain decision, see §8.1 |
 
@@ -40,9 +46,9 @@ command in §7; anything without evidence is marked ⬜ or "not verified".
 | 4 — Live progress | `fetch` + `ReadableStream` SSE, reconnect, dedupe, abort, status chip | ✅ |
 | 5 — Data & administration | assets (upload/download/checksum), mappings (+versions), **pipelines (create + run)**, API keys, audit | ✅ |
 | 6 — Quality | dark/light themes, responsive, keyboard/axe, CI e2e (built + compose), docs | ✅ |
-| D2 — Studio M0/M1 | contracts + stored-trace debugger (`/studio`, `/studio/debugger/:runId`) | 🟨 review |
-| D3 — Studio M2+ | mapping studio, schema explorer, lineage, validation centre | ⬜ |
-| E+ — Adapter wave | HL7 v2, CDA, DICOMweb, XLSX, OMOP, MySQL connector | ⬜ |
+| D2 — Studio M0/M1 | contracts + stored-trace debugger (`/studio`, `/studio/debugger/:runId`) | ✅ |
+| D3 — Studio M2 | mapping editor, draft API, live preview, schema explorers, lineage view, validation centre | ✅ |
+| E+ — Adapter wave | HL7 v2, CDA, DICOMweb, XLSX, OMOP, MySQL connector, VCF/FASTA/PDF/EDF/CDISC-ODM, FHIR REST/validator, NDJSON split | ✅ |
 
 ---
 
@@ -90,7 +96,7 @@ README capability/quickstart, `ARCHITECTURE.md` §9, `docs/api.md` limits contra
 
 ---
 
-## 4. Studio M0/M1 (landed in `5ebc7fa`, not authored in this session)
+## 4. Studio M0/M1 (landed in `5ebc7fa`) and M2 (landed in `8203902` → `30dd443`)
 
 Present in the tree and passing E2E; listed here so the tracker reflects reality:
 
@@ -101,11 +107,18 @@ Present in the tree and passing E2E; listed here so the tracker reflects reality
   exact mapping version fetch, stored-trace timeline with virtual window, filters, event detail,
   provenance panel, record panel, export, explicit "stored traces, not live execution" wording.
 - 33 E2E tests: `studio-debugger.spec.ts`, `studio-navigation.spec.ts`, `studio-shell.spec.ts`.
-- Also touched `app.routes.ts`, `connect.page.ts`, `run-detail.page.ts`, `app.component.ts`,
-  `core/api-types.ts`.
+- M2 mapping editor (`8203902`, finished in `e644291`, merged in `30dd443`): rule-table editor
+  UI at `/mapping-editor/:mappingId`, mapping-studio draft/preview/publish/diff API
+  (`mapping-studio.controller.ts`), live preview service, coverage; E2E
+  `mapping-editor.spec.ts`.
+- `44a40a4` (this HEAD): 13 opt-in adapters, FHIR NDJSON split into `@healthbridge/fhir-ndjson`
+  (4th built-in), opt-in BullMQ driver, auto-selected S3 driver, retention service + DELETE
+  endpoints + sweeper, OpenAPI generator + committed `docs/openapi.json` (CI `--check`) +
+  `@healthbridge/client`, `GET /assets/:id/schema`, lineage/mapping-editor/validation-centre
+  pages with E2E, pause/resume checkpoints, benchmarks, docs site, security fixtures.
 
-**Verification:** all 64 E2E tests pass against the composed stack (§7). **Not verified by me:**
-the design intent behind those files — review with the author before closing D2.
+**Verification:** all 64 E2E tests pass against the composed stack (§7). **Not re-verified by me:**
+the design intent behind the M0/M1 files — review with the author before closing D2.
 
 ---
 
@@ -162,15 +175,19 @@ behaviour, missing API, proposed design, acceptance criteria and explicit non-go
 that folder is implemented; the console renders these as `planned` cards.
 
 **8.1 Component-DOM tests** — the only gap against the approved test plan.
-Options: Vitest + `@analogjs/vitest-angular` (fast, no browser binary) or Karma + Chromium
-(`CHROME_BIN` from Playwright). Acceptance: `ng test` green in CI, specs for `StatusChip`,
+A Vitest harness and two specs exist (`vitest.config.mts`, `auth.store.spec.ts`,
+`ui/primitives.spec.ts`) but there is no CI gate yet.
+Options: wire `npm run test:unit` into CI, or add Karma + Chromium
+(`CHROME_BIN` from Playwright). Acceptance: `test:unit` green in CI, specs for `StatusChip`,
 `ErrorPanel`, `ConnectPage` validation, `RunsPage` filter/pagination state, `AuthStore`.
 Risk: new toolchain; keep it isolated to `apps/web` so the node:test suite stays untouched.
 
-**8.2 Studio M2 — mapping editor** — visual mapping over the stored spec with version diffing.
-Needs: schema endpoint for source fields (`/formats` is not enough), server-side spec validation
-before save, optimistic-concurrency token on mapping updates. Acceptance: edit → save → run
-produces a new mapping version, and the debugger can pick either version.
+**8.2 Studio follow-ups** — the M2 editor, schema explorers, lineage view and validation
+centre are shipped per-run slices. Remaining: server-side spec validation before save,
+optimistic-concurrency token on mapping updates, aggregate lineage/validation endpoints
+(so the UI stops deriving graphs from one page of traces), and a navigation pass so every
+shipped route is reachable from the shell or a run/asset page (see `STU-001`, `STU-004`,
+`VAL-002` in `MISSING.md`).
 
 **8.3 Schema explorer + lineage** — read-only first. Lineage can be derived today from stored
 traces (source field → target path) but needs an aggregate endpoint; do not fake it client-side
@@ -182,15 +199,23 @@ with one page of rows.
 **8.5 Cookie-based BFF/OIDC** — `AuthStore` is the seam (§2 of `docs/console.md`). Acceptance:
 no key in the browser at all, session probe, CSRF protection, SSO logout.
 
-**8.6 OpenAPI document + generated client** — removes the hand-maintained DTOs that caused two
-of the defects in §5.
+**8.6 OpenAPI generated client adoption** — the document (`docs/openapi.json`, CI
+`--check`) and `@healthbridge/client` exist, but the console still hand-writes DTOs and the
+generator omits `MappingStudioController` (see `API-003` in `MISSING.md`). Acceptance: the
+console consumes the generated client and the drift test covers every controller.
 
-**8.7 Repo hygiene** — no remote configured; `main` is local only. Add the remote and push when
-the owner confirms the destination.
+**8.7 Repo hygiene** — ✅ remote `origin` (`github.com/Villain20000/HealthBridge`) configured;
+`main` tracks `origin/main`. Generated output (`docs/site/`, `benchmark-results/`, compiled
+`packages/fhir-ndjson/src/*.{js,d.ts*}`) stays untracked via `.gitignore`; do not commit it.
 
 ---
 
 ## 9. Changelog of this file
 
+- **2026-11-01 — HEAD `44a40a4` truth pass.** Status table, phase tracker, §4 and §8 updated
+  for the M2 editor, adapter wave, BullMQ/S3 opt-ins, retention + DELETE endpoints, OpenAPI +
+  `@healthbridge/client`, schema/lineage/validation-centre pages, pause/resume, benchmarks,
+  docs site and release automation. Remote `origin` now configured; generated output
+  (`docs/site/`, `benchmark-results/`, compiled fhir-ndjson `src/`) stays untracked.
 - **Initial tracker** — records Phases 0–6 (console v1), pipelines, defects fixed, verification
   evidence, Studio M0/M1 review status and the ordered backlog above.
