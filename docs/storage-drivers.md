@@ -1,6 +1,6 @@
-# S3-compatible object storage — planned
+# S3-compatible object storage — shipped
 
-**Status:** ⬜ not implemented · **Phase:** F · **UI today:** `/assets` shows `storage: local-fs`
+**Status:** ✅ S3 driver shipped and auto-selected when configured · **Phase:** F · **UI today:** `/assets` shows `storage: local-fs`
 from `/healthz`; no option to change it.
 
 ## Why it matters

@@ -1,6 +1,6 @@
-# OpenAPI document and generated client — planned
+# OpenAPI document and generated client — shipped
 
-**Status:** ⬜ not implemented · **Phase:** C · **UI today:** `docs/api.md` is the contract and
+**Status:** ✅ `@healthbridge/client` ships (typed REST client over fetch) · **Phase:** C · **UI today:** `docs/api.md` is the contract and
 `core/api-types.ts` is hand-written against it.
 
 ## Why it matters

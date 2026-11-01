@@ -18,6 +18,12 @@
       "path": "../../packages/mapping-engine"
     },
     {
+      "path": "../../packages/transformation-engine"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
       "path": "../../packages/storage"
     },
     {

@@ -4,6 +4,7 @@ import {
   CsvFormatAdapter,
   JsonFormatAdapter,
   FhirJsonFormatAdapter,
+  FhirNdjsonFormatAdapter,
   readCsvTable,
   buildCsvRecords,
   decodeBuffer,
@@ -168,7 +169,7 @@ describe("adapter registry detection", () => {
 });
 
 describe("FHIR NDJSON adapter", () => {
-  const adapter = new FhirJsonFormatAdapter();
+  const adapter = new FhirNdjsonFormatAdapter();
 
   test("reports malformed lines instead of silently dropping them", async () => {
     const input = {
@@ -195,7 +196,9 @@ describe("FHIR NDJSON adapter", () => {
       type: "collection",
       entry: [{ resource: { resourceType: "Patient", id: "p1" } }, { resource: { resourceType: "Patient", id: "p2" } }],
     };
-    const inspection = await adapter.inspect({
+    // Bundles stay with the single-resource/Bundle JSON adapter.
+    const jsonAdapter = new FhirJsonFormatAdapter();
+    const inspection = await jsonAdapter.inspect({
       id: "in-8",
       filename: "bundle.json",
       contentString: JSON.stringify(bundle),

@@ -2,7 +2,7 @@
 
 Content-addressed object storage drivers for HealthBridge OS, with local filesystem and in-memory implementations.
 
-**Status:** Partial: local filesystem and in-memory drivers only. An S3-compatible driver is planned.
+**Status:** Partial: local filesystem, in-memory and S3-compatible drivers (`S3StorageDriver` in `src/s3.ts`, SigV4, env config); the API selects S3 automatically when `HEALTHBRIDGE_S3_ENDPOINT` + bucket are configured, otherwise local/memory.
 
 ## Install
 

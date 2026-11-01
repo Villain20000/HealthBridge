@@ -1,6 +1,6 @@
 # FHIR Validation Centre — planned
 
-**Status:** ⬜ not implemented · **Phase:** F · **UI today:** run detail lists structural issues
+**Status:** 🟡 shipped per-run (validation centre page renders stored levels); aggregation across runs still planned · **Phase:** F · **UI today:** levels 4–6 render as executed only when a validator/provider is injected
 only; the console never claims profile or terminology validation.
 
 ## Why it matters
@@ -16,10 +16,10 @@ profile or uses a retired LOINC code. Operators need to know which level was act
 
 ## What is missing
 
-- No external validator adapter (e.g. a HAPI validator service) and no profile registry.
-- No terminology server integration (LOINC, SNOMED CT, ICD-10/11, UCUM, RxNorm, ATC) with
-  licence-aware loading.
-- No per-level result model (`structural` / `profile` / `terminology` / `referential`).
+- External validator adapter and MIABIS profile validators exist as opt-in `ProfileValidator`s; no profile registry.
+- Local terminology provider exists (operator-supplied tables with licence metadata; level 5 executes end-to-end); no terminology server integration for licensed systems (LOINC, SNOMED CT, ICD-10/11, RxNorm, ATC).
+  Server integration for those systems is still open.
+- Per-level result model exists (`result.validation.levels` with executed/skipped + reason); aggregation across runs and a profile registry are still open.
 
 ## Proposed design
 

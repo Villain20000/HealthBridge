@@ -268,3 +268,5 @@ function toMetadata(object: StoredObject): StorageObject {
     contentType: object.contentType,
   };
 }
+
+export * from "./s3.js";

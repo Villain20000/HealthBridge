@@ -171,15 +171,15 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
       <div class="grid cols-2" style="margin-top: var(--space-3)">
         <hb-planned
           title="Schema explorer"
-          message="Field paths and types for an asset are planned. No schema endpoint is exposed yet."
+          message="Shipped: the mapping editor embeds source/target schema explorers, and GET /assets/:id/schema serves stored summaries."
         />
         <hb-planned
           title="Validation centre"
-          message="Aggregated validation issues across runs are planned. Each run's issues are on its run page today."
+          message="Shipped per-run at validation-centre/:runId. Aggregated issues across runs are still planned."
         />
         <hb-planned
           title="Lineage explorer"
-          message="Declared lineage from mapping rules is planned. Trace protocol v1.2 records record-level mapping events only; per-rule observed lineage is never recorded."
+          message="Shipped as a read-only stored-trace graph at lineage/:runId. Declared per-rule lineage stays planned: traces record record-level events only."
         />
       </div>
     </section>

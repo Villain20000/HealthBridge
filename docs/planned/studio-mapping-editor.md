@@ -1,6 +1,6 @@
 # Visual Mapping Studio (M2) — planned
 
-**Status:** ⬜ not implemented · **Phase:** D2 · **UI today:** `features/mappings` is read-only
+**Status:** 🟡 rule-table editor shipped (keyboard-complete, static validation, version history); drag-and-drop + drafts still planned · **Phase:** D2 · **UI today:** `features/mappings` is read-only
 (import JSON, list, inspect stored spec, version history).
 
 ## Why it matters

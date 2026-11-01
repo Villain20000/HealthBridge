@@ -14,12 +14,18 @@ import {
   PersistenceError,
   PipelineRecord,
   PipelineRepository,
+  PlatformAuditEvent,
+  PlatformAuditRepository,
+  RETENTION_BATCH_LIMIT,
   Repositories,
   RunRecord,
   RunRepository,
   RunStatus,
   RunTraceRecord,
+  TERMINAL_RUN_STATUSES,
   Workspace,
+  WorkspacePurgeRecord,
+  WorkspacePurgeRepository,
   WorkspaceRepository,
   isAfterCursor,
   normalisePage,
@@ -90,6 +96,18 @@ export class InMemoryWorkspaceRepository implements WorkspaceRepository {
       request,
     );
   }
+
+  public async softDelete(id: string, deletedAt: string): Promise<boolean> {
+    const found = this.items.get(id);
+    if (!found || found.deletedAt) return false;
+    this.items.set(id, { ...found, deletedAt });
+    return true;
+  }
+
+  /** Memory-only: used by the purge repository, which owns the cascade order. */
+  public hardDelete(id: string): boolean {
+    return this.items.delete(id);
+  }
 }
 
 export class InMemoryAssetRepository {
@@ -117,6 +135,35 @@ export class InMemoryAssetRepository {
     if (!found || found.workspaceId !== workspaceId) return false;
     this.items.delete(id);
     return true;
+  }
+
+  public async listExpired(
+    workspaceId: string,
+    createdBefore: string,
+    limit = RETENTION_BATCH_LIMIT,
+  ): Promise<AssetRecord[]> {
+    const cutoff = new Date(createdBefore).getTime();
+    return [...this.items.values()]
+      .filter((item) => item.workspaceId === workspaceId && new Date(item.createdAt).getTime() < cutoff)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .slice(0, Math.max(0, limit))
+      .map(clone);
+  }
+
+  public async storageKeyInUse(storageKey: string): Promise<boolean> {
+    for (const item of this.items.values()) if (item.storageKey === storageKey) return true;
+    return false;
+  }
+
+  /** Memory-only: removes every asset row of a purged workspace and returns them. */
+  public deleteByWorkspace(workspaceId: string): AssetRecord[] {
+    const removed: AssetRecord[] = [];
+    for (const [id, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      removed.push(clone(item));
+      this.items.delete(id);
+    }
+    return removed;
   }
 }
 
@@ -164,6 +211,17 @@ export class InMemoryMappingRepository implements MappingRepository {
       .filter((item) => item.workspaceId === workspaceId && item.name === name)
       .sort((a, b) => b.version - a.version)
       .map(clone);
+  }
+
+  /** Memory-only: removes every mapping version of a purged workspace. */
+  public deleteByWorkspace(workspaceId: string): number {
+    let removed = 0;
+    for (const [id, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      this.items.delete(id);
+      removed++;
+    }
+    return removed;
   }
 }
 
@@ -219,6 +277,17 @@ export class InMemoryMappingDraftRepository implements MappingDraftRepository {
     this.items.delete(key);
     return true;
   }
+
+  /** Memory-only: removes every draft of a purged workspace. */
+  public deleteByWorkspace(workspaceId: string): number {
+    let removed = 0;
+    for (const [key, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      this.items.delete(key);
+      removed++;
+    }
+    return removed;
+  }
 }
 
 export class InMemoryPipelineRepository implements PipelineRepository {
@@ -250,6 +319,17 @@ export class InMemoryPipelineRepository implements PipelineRepository {
     const scoped = [...this.items.values()].filter((item) => item.workspaceId === workspaceId);
     const page = paginate(scoped, request);
     return { items: page.items.map(clone), nextCursor: page.nextCursor };
+  }
+
+  /** Memory-only: removes every pipeline of a purged workspace. */
+  public deleteByWorkspace(workspaceId: string): number {
+    let removed = 0;
+    for (const [id, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      this.items.delete(id);
+      removed++;
+    }
+    return removed;
   }
 }
 
@@ -330,6 +410,52 @@ export class InMemoryRunRepository implements RunRepository {
     }
     return (this.traces.get(runId) ?? []).map(clone).sort((a, b) => a.seq - b.seq);
   }
+
+  public async delete(workspaceId: string, id: string): Promise<boolean> {
+    const found = this.items.get(id);
+    if (!found || found.workspaceId !== workspaceId) return false;
+    this.items.delete(id);
+    this.traces.delete(id);
+    return true;
+  }
+
+  public async listExpired(
+    workspaceId: string,
+    finishedBefore: string,
+    limit = RETENTION_BATCH_LIMIT,
+  ): Promise<RunRecord[]> {
+    const cutoff = new Date(finishedBefore).getTime();
+    return [...this.items.values()]
+      .filter((item) => {
+        if (item.workspaceId !== workspaceId) return false;
+        if (!TERMINAL_RUN_STATUSES.includes(item.status)) return false;
+        const finished = item.finishedAt ?? item.cancelledAt ?? item.createdAt;
+        return new Date(finished).getTime() < cutoff;
+      })
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+      .slice(0, Math.max(0, limit))
+      .map(clone);
+  }
+
+  public async countByAsset(workspaceId: string, assetId: string): Promise<number> {
+    let count = 0;
+    for (const item of this.items.values()) {
+      if (item.workspaceId === workspaceId && item.assetId === assetId) count++;
+    }
+    return count;
+  }
+
+  /** Memory-only: removes every run (and trace) row of a purged workspace. */
+  public deleteByWorkspace(workspaceId: string): number {
+    let removed = 0;
+    for (const [id, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      this.items.delete(id);
+      this.traces.delete(id);
+      removed++;
+    }
+    return removed;
+  }
 }
 
 export class InMemoryAuditRepository implements AuditRepository {
@@ -345,6 +471,17 @@ export class InMemoryAuditRepository implements AuditRepository {
     const scoped = [...this.items.values()].filter((item) => item.workspaceId === workspaceId);
     const page = paginate(scoped, request);
     return { items: page.items.map(clone), nextCursor: page.nextCursor };
+  }
+
+  /** Memory-only: tenant audit cascades with a purged workspace. */
+  public deleteByWorkspace(workspaceId: string): number {
+    let removed = 0;
+    for (const [id, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      this.items.delete(id);
+      removed++;
+    }
+    return removed;
   }
 }
 
@@ -368,20 +505,136 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   public async save(record: IdempotencyRecord): Promise<void> {
     this.items.set(this.keyOf(record.workspaceId, record.key), clone(record));
   }
+
+  public async deleteByResource(workspaceId: string, resourceType: string, resourceId: string): Promise<number> {
+    let removed = 0;
+    for (const [key, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      if (item.resourceType !== resourceType || item.resourceId !== resourceId) continue;
+      this.items.delete(key);
+      removed++;
+    }
+    return removed;
+  }
+
+  /** Memory-only: removes every idempotency index row of a purged workspace. */
+  public deleteByWorkspace(workspaceId: string): number {
+    let removed = 0;
+    for (const [key, item] of this.items) {
+      if (item.workspaceId !== workspaceId) continue;
+      this.items.delete(key);
+      removed++;
+    }
+    return removed;
+  }
+}
+
+export class InMemoryWorkspacePurgeRepository implements WorkspacePurgeRepository {
+  private readonly items = new Map<string, WorkspacePurgeRecord>();
+
+  constructor(
+    private readonly stores: {
+      workspaces: InMemoryWorkspaceRepository;
+      apiKeys: InMemoryApiKeyStore;
+      assets: InMemoryAssetRepository;
+      mappings: InMemoryMappingRepository;
+      mappingDrafts: InMemoryMappingDraftRepository;
+      pipelines: InMemoryPipelineRepository;
+      runs: InMemoryRunRepository;
+      audit: InMemoryAuditRepository;
+      idempotency: InMemoryIdempotencyStore;
+    },
+  ) {}
+
+  public async schedule(record: WorkspacePurgeRecord): Promise<WorkspacePurgeRecord> {
+    this.items.set(record.workspaceId, clone(record));
+    return clone(record);
+  }
+
+  public async find(workspaceId: string): Promise<WorkspacePurgeRecord | undefined> {
+    const found = this.items.get(workspaceId);
+    return found ? clone(found) : undefined;
+  }
+
+  public async listDue(now: string, limit = RETENTION_BATCH_LIMIT): Promise<WorkspacePurgeRecord[]> {
+    const cutoff = new Date(now).getTime();
+    return [...this.items.values()]
+      .filter((item) => new Date(item.scheduledAt).getTime() <= cutoff)
+      .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt) || a.workspaceId.localeCompare(b.workspaceId))
+      .slice(0, Math.max(0, limit))
+      .map(clone);
+  }
+
+  public async remove(workspaceId: string): Promise<boolean> {
+    return this.items.delete(workspaceId);
+  }
+
+  public async purge(workspaceId: string): Promise<string[]> {
+    const assets = this.stores.assets.deleteByWorkspace(workspaceId);
+    this.stores.runs.deleteByWorkspace(workspaceId);
+    this.stores.pipelines.deleteByWorkspace(workspaceId);
+    this.stores.mappingDrafts.deleteByWorkspace(workspaceId);
+    this.stores.mappings.deleteByWorkspace(workspaceId);
+    this.stores.audit.deleteByWorkspace(workspaceId);
+    this.stores.idempotency.deleteByWorkspace(workspaceId);
+    await this.stores.apiKeys.deleteByWorkspace(workspaceId);
+    this.stores.workspaces.hardDelete(workspaceId);
+    this.items.delete(workspaceId);
+    return [...new Set(assets.map((asset) => asset.storageKey))];
+  }
+}
+
+export class InMemoryPlatformAuditRepository implements PlatformAuditRepository {
+  private readonly items = new Map<string, PlatformAuditEvent>();
+
+  public async append(event: PlatformAuditEvent): Promise<PlatformAuditEvent> {
+    this.items.set(event.id, clone(event));
+    return clone(event);
+  }
+
+  public async list(request: PageRequest & { workspaceId?: string } = {}): Promise<Page<PlatformAuditEvent>> {
+    const scoped = [...this.items.values()].filter(
+      (item) => request.workspaceId === undefined || item.workspaceId === request.workspaceId,
+    );
+    const page = paginate(scoped, request);
+    return { items: page.items.map(clone), nextCursor: page.nextCursor };
+  }
 }
 
 export function createMemoryRepositories(): Repositories {
+  const workspaces = new InMemoryWorkspaceRepository();
+  const apiKeys = new InMemoryApiKeyStore();
+  const assets = new InMemoryAssetRepository();
+  const mappings = new InMemoryMappingRepository();
+  const mappingDrafts = new InMemoryMappingDraftRepository();
+  const pipelines = new InMemoryPipelineRepository();
+  const runs = new InMemoryRunRepository();
+  const audit = new InMemoryAuditRepository();
+  const idempotency = new InMemoryIdempotencyStore();
+
   return {
     mode: "memory",
-    workspaces: new InMemoryWorkspaceRepository(),
-    apiKeys: new InMemoryApiKeyStore(),
-    assets: new InMemoryAssetRepository(),
-    mappings: new InMemoryMappingRepository(),
-    mappingDrafts: new InMemoryMappingDraftRepository(),
-    pipelines: new InMemoryPipelineRepository(),
-    runs: new InMemoryRunRepository(),
-    audit: new InMemoryAuditRepository(),
-    idempotency: new InMemoryIdempotencyStore(),
+    workspaces,
+    apiKeys,
+    assets,
+    mappings,
+    mappingDrafts,
+    pipelines,
+    runs,
+    audit,
+    idempotency,
+    workspacePurges: new InMemoryWorkspacePurgeRepository({
+      workspaces,
+      apiKeys,
+      assets,
+      mappings,
+      mappingDrafts,
+      pipelines,
+      runs,
+      audit,
+      idempotency,
+    }),
+    platformAudit: new InMemoryPlatformAuditRepository(),
     close: async () => undefined,
   };
 }

@@ -193,6 +193,37 @@ export class HealthBridge {
     return result;
   }
 
+  /**
+   * Streaming output over an already-executed transform. The parse itself still
+   * buffers (see the streaming-CSV limitation in README), so this streams the
+   * *output* resource-by-resource with progress and cooperative cancellation —
+   * it never claims to stream the input. Honest naming matters here.
+   */
+  public async *transformStream(params: {
+    input: InputSource;
+    mapping: MappingDefinition;
+    adapterId?: string;
+    maxRecords?: number;
+    signal?: AbortSignal;
+    runId?: string;
+    importedAt?: string;
+    pipelineVersion?: string;
+    onProgress?: (progress: { emitted: number; total: number; runId: string }) => void;
+  }): AsyncIterable<{ index: number; resource: unknown; runId: string }> {
+    const result = await this.transform(params);
+    const total = result.output.length;
+    for (let index = 0; index < total; index++) {
+      if (params.signal?.aborted) {
+        throw new HealthBridgeError("CANCELLED", "Transformation stream cancelled", "cancelled", {
+          runId: result.runId,
+          emitted: index,
+        });
+      }
+      params.onProgress?.({ emitted: index + 1, total, runId: result.runId });
+      yield { index, resource: result.output[index], runId: result.runId };
+    }
+  }
+
   public getRun(runId: string): StoredRun | undefined {
     return this.runs.get(runId);
   }
@@ -311,3 +342,5 @@ export * from "@healthbridge/validation";
 export * from "@healthbridge/lineage-engine";
 export * from "@healthbridge/target-builders";
 export * from "@healthbridge/trace-protocol";
+export * from "./plugins.js";
+export * from "./csv-file-stream.js";

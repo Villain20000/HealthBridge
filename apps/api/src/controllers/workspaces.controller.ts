@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Post, Req } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, Inject, Post, Req } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
 import { ApiError } from "../common/errors.js";
 import { CurrentPrincipal, PublicRoute, RequiresScope, type AuthenticatedRequest } from "../common/auth.guard.js";
@@ -96,5 +96,21 @@ export class WorkspacesController {
       workspace,
       key: { id: principal.apiKeyId, name: principal.keyName, role: principal.role, scopes: principal.scopes },
     };
+  }
+
+  @RequiresScope("workspaces:admin")
+  @Delete("current")
+  public async remove(
+    @CurrentPrincipal() principal: Principal,
+    @Body() body: unknown,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    const payload = requireObject(body);
+    return this.ctx.retention.requestWorkspaceDeletion({
+      principal,
+      confirm: payload.confirm,
+      requestId: request.requestId,
+      ip: request.ip,
+    });
   }
 }

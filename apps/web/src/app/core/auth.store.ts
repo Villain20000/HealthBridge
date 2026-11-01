@@ -42,7 +42,7 @@ export class AuthStore {
   public readonly state = this.stateSignal.asReadonly();
   public readonly isConnected = computed(() => this.stateSignal().connected);
   public readonly inFlight = computed(() => this.inFlightSignal());
-  public readonly keyPrefix = computed(() => this.stateSignal().keyPrefix);
+  public readonly keyPrefix = computed(() => this.stateSignal().keyPrefix ?? "");
   public readonly failure = computed(() => this.stateSignal().failure);
 
   /** Called by the connect screen only after `GET /healthz` + `GET /workspaces/current` succeeded. */

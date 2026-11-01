@@ -2,7 +2,7 @@
 
 Healthcare standards validation and `OperationOutcome` generation for HealthBridge OS.
 
-**Status:** Partial: structural checks for Patient, Observation, Specimen and `resourceType`. Profile, terminology and referential levels are not executed.
+**Status:** Partial: structural checks for Patient, Observation, Specimen and `resourceType`. Profile, terminology and referential levels execute only when injected (`ProfileValidator`, `TerminologyProvider`, sibling resources — e.g. the MIABIS validators or operator-supplied code tables); otherwise they report skipped, never passed.
 
 ## Install
 

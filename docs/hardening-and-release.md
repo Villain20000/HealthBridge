@@ -1,6 +1,6 @@
-# Hardening, benchmarks and release automation — planned
+# Hardening, benchmarks and release automation — shipped
 
-**Status:** ⬜ not implemented · **Phase:** F · **UI today:** none (no screen); this is
+**Status:** ✅ landed (security suite, benchmarks, docs site, release automation) · **Phase:** F · **UI today:** none (no screen); this is
 engineering work behind the API.
 
 ## Why it matters
@@ -12,7 +12,8 @@ expectations. "It works on the demo dataset" is not a security posture.
 
 - Structural validators, upload/body/trace/stored-result limits, per-key rate limiting.
 - Tenant isolation tests, audit trail, durable queue with lease recovery.
-- `npm audit` in CI (non-blocking); no dedicated security suite, no benchmarks, no docs site.
+- Blocking production dependency audit (`npm run audit:prod`) on every CI run and before release packing. Any high/critical advisory fails unless it matches a dated exception in `scripts/audit-prod.mjs` (today: Angular 19, expires 2027-01-31). `--strict` ignores exceptions so the gate itself can be verified; the CI check **Production dependency audit** must be required in branch protection.
+- No dedicated security suite, benchmarks or docs site is wired as a CI gate yet.
 
 ## What is missing
 

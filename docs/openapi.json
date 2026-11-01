@@ -1,0 +1,4873 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "HealthBridge API",
+    "version": "1",
+    "description": "REST API over the HealthBridge transformation engine. Base path `/api/v1`; uploads are raw bytes, everything else is JSON. Every failure uses one envelope (`ErrorEnvelope`) with a stable `ErrorCode`. Engine and trace-protocol versions are runtime values — see `GET /version`."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Same origin as the API deployment."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Public liveness, versions and capabilities."
+    },
+    {
+      "name": "Workspaces",
+      "description": "Bootstrap provisioning and the current workspace."
+    },
+    {
+      "name": "Keys",
+      "description": "API key issue, list, revoke and rotate."
+    },
+    {
+      "name": "Assets",
+      "description": "Content-addressed file upload and retrieval."
+    },
+    {
+      "name": "Mappings",
+      "description": "Immutable versioned mapping catalogue."
+    },
+    {
+      "name": "Pipelines",
+      "description": "Named mapping + options combinations."
+    },
+    {
+      "name": "Runs",
+      "description": "Async execution, outputs, traces, bundles, replay and live progress."
+    },
+    {
+      "name": "Audit",
+      "description": "Append-only, tenant-scoped audit trail (owner only)."
+    }
+  ],
+  "paths": {
+    "/api/v1/healthz": {
+      "get": {
+        "operationId": "HealthController.healthz",
+        "summary": "Liveness and limits discovery",
+        "description": "Public on purpose: a health check that needs credentials is not a health check. Reports the persistence mode so a demo instance can never be mistaken for a durable deployment, and the authoritative upload/body/rate/queue limits.",
+        "tags": [
+          "Health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Liveness report with mode, queue depth and limits.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "operationId": "HealthController.version",
+        "summary": "Engine and protocol versions",
+        "description": "Public. Reports the engine, trace-protocol and API versions plus the persistence mode.",
+        "tags": [
+          "Health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Version report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "engine": {
+                      "type": "string"
+                    },
+                    "traceProtocol": {
+                      "type": "string"
+                    },
+                    "api": {
+                      "type": "string"
+                    },
+                    "node": {
+                      "type": "string"
+                    },
+                    "persistence": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/formats": {
+      "get": {
+        "operationId": "HealthController.formats",
+        "summary": "Adapter capability manifest",
+        "description": "Public. Capability manifest of the adapter registry (no patient data involved).",
+        "tags": [
+          "Health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Adapter capability manifest.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "formats": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces": {
+      "post": {
+        "operationId": "WorkspacesController.create",
+        "summary": "Provision a workspace",
+        "description": "Creates the first workspace with the operator-held bootstrap token (`x-bootstrap-token`). The token is platform-level: it cannot read tenant data and is the only way to add a tenant. Returns the workspace and its owner key; the plaintext key is shown exactly once. Attempts are rate limited per client IP.\n\nRequires the operator-held `x-bootstrap-token`, not an API key.",
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "BootstrapToken": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The created workspace and its owner key (plaintext, shown once).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "$ref": "#/components/schemas/Workspace"
+                    },
+                    "apiKey": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string",
+                          "description": "Plaintext key (`hb_…`). Store it now: it cannot be retrieved again."
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "note": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "x-bootstrap-token",
+            "in": "header",
+            "required": true,
+            "description": "Operator-held bootstrap token (minimum 16 characters).",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Workspace to provision.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "slug"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "slug": {
+                    "type": "string",
+                    "description": "URL-safe slug."
+                  },
+                  "plan": {
+                    "type": "string",
+                    "default": "community"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workspaces/current": {
+      "get": {
+        "operationId": "WorkspacesController.current",
+        "summary": "Describe the current workspace and key",
+        "description": "Returns the workspace identified by the caller's key plus the key metadata (never the secret).\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace and key metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspace": {
+                      "$ref": "#/components/schemas/Workspace"
+                    },
+                    "key": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string"
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "WorkspacesController.remove",
+        "summary": "Delete the current workspace",
+        "description": "Owner-only. Requires the workspace slug in `confirm`. Soft-deletes the workspace, revokes every API key in it and schedules a hard purge (`workspace_purges`) after the configured grace period (`HEALTHBRIDGE_WORKSPACE_GRACE_DAYS`, default 7). Data stays readable to operators during the grace period; the retention sweep then deletes the workspace and every tenant row, keeping a platform audit record of the purge. A wrong slug returns 400 `VALIDATION_FAILED` and changes nothing.\n\nRequires scope `workspaces:admin`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion receipt with the scheduled purge time and revoked-key count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted",
+                    "workspaceId",
+                    "workspaceSlug",
+                    "purgeScheduledAt",
+                    "keysRevoked"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "workspaceId": {
+                      "type": "string"
+                    },
+                    "workspaceSlug": {
+                      "type": "string"
+                    },
+                    "purgeScheduledAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "keysRevoked": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "workspaces:admin",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Destructive-action confirmation.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "string",
+                    "description": "The workspace slug, exactly."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/keys": {
+      "post": {
+        "operationId": "KeysController.issue",
+        "summary": "Issue an API key",
+        "description": "Issues a key for the caller's workspace. The plaintext is returned exactly once; every other response carries the prefix and metadata. `role` defaults to `viewer`. Unknown scope names are rejected with `VALIDATION_FAILED`.\n\nRequires scope `workspaces:admin`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Keys"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Plaintext key (once) plus its metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "description": "Plaintext key. Store it now: it cannot be retrieved again."
+                    },
+                    "apiKey": {
+                      "$ref": "#/components/schemas/ApiKey"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "workspaces:admin",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Key to issue.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "owner",
+                      "editor",
+                      "viewer",
+                      "service"
+                    ],
+                    "default": "viewer"
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Explicit scopes; validated against the role."
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "KeysController.list",
+        "summary": "List API keys",
+        "description": "Lists key metadata (prefixes, roles, scopes). Never returns secrets.\n\nRequires scope `workspaces:admin`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Keys"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Key metadata for the workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKey"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "workspaces:admin",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/keys/{id}": {
+      "delete": {
+        "operationId": "KeysController.revoke",
+        "summary": "Revoke an API key",
+        "description": "Revokes the key. A revoked key authenticates as `REVOKED_KEY` (401).\n\nRequires scope `workspaces:admin`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Keys"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revocation receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "workspaces:admin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/keys/{id}/rotate": {
+      "post": {
+        "operationId": "KeysController.rotate",
+        "summary": "Rotate an API key",
+        "description": "Issues a replacement key and revokes the old one. The new plaintext is returned exactly once.\n\nRequires scope `workspaces:admin`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Keys"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Replacement plaintext key plus metadata; `revoked` names the retired key id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "apiKey": {
+                      "$ref": "#/components/schemas/ApiKey"
+                    },
+                    "revoked": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "workspaces:admin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/assets": {
+      "post": {
+        "operationId": "AssetsController.upload",
+        "summary": "Upload an asset (raw bytes)",
+        "description": "Uploads a file as the raw request body (any content type; hospital exports are routinely mislabelled). Objects are content-addressed by SHA-256, so identical bytes are stored once; the metadata row is tenant-scoped. Detection fills in `sourceFormat`/`domain` honestly — an unknown format stays `unknown`. `filename` may be a query parameter or the `x-filename` header.\n\nRequires scope `assets:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The stored asset with checksum and detection result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asset": {
+                      "$ref": "#/components/schemas/Asset"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Failure envelope with one of: `PAYLOAD_TOO_LARGE` (413).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "assets:write",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "query",
+            "required": false,
+            "description": "File name (max 255 characters). Defaults to `upload.bin`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "description": "Override the detected domain.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Override the detected source format.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-filename",
+            "in": "header",
+            "required": false,
+            "description": "Alternative to the `filename` query parameter.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The file bytes (`application/octet-stream` or the file's own type). Must be non-empty.",
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "AssetsController.list",
+        "summary": "List assets",
+        "description": "Lists asset metadata for the workspace, newest first.\n\nRequires scope `assets:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Asset page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "assets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Asset"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for the next page, or null."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "assets:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items to return. Defaults are service-defined; values are bounded.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous `nextCursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/assets/{id}": {
+      "get": {
+        "operationId": "AssetsController.get",
+        "summary": "Get an asset",
+        "description": "Returns asset metadata. A foreign id reads as 404, never 403, so identifiers cannot be probed.\n\nRequires scope `assets:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Asset metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "asset": {
+                      "$ref": "#/components/schemas/Asset"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "assets:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "AssetsController.remove",
+        "summary": "Delete an asset",
+        "description": "Hard-deletes the asset metadata row. Refused with 409 `CONFLICT` while any run in the workspace still references the asset — delete or retain those runs first. The content-addressed object is deleted only when no asset in any workspace still references the same bytes, so shared uploads survive another tenant's deletion.\n\nRequires scope `assets:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion receipt; `blobDeleted` reports whether the shared object was removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted",
+                    "assetId",
+                    "blobDeleted"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "assetId": {
+                      "type": "string"
+                    },
+                    "blobDeleted": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "assets:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/assets/{id}/schema": {
+      "get": {
+        "operationId": "AssetsController.schema",
+        "summary": "Get an asset's detected schema",
+        "description": "Re-inspects the stored bytes with the adapter registry and returns the adapter's field summary. A foreign id reads as 404, never 403. An asset no registered adapter accepts returns `supported: false` with a null schema (plus the detection recorded at upload) instead of an error.\n\nRequires scope `assets:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Adapter inspect/schema summary for the stored asset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "assetId",
+                    "format",
+                    "domain",
+                    "supported"
+                  ],
+                  "properties": {
+                    "assetId": {
+                      "type": "string",
+                      "description": "Asset id (`as_…`)."
+                    },
+                    "format": {
+                      "type": "string",
+                      "description": "Detected format, or the stored `sourceFormat` when unsupported."
+                    },
+                    "formatVersion": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Adapter-reported format version, when known."
+                    },
+                    "domain": {
+                      "type": "string",
+                      "description": "Detected domain, or the stored `domain` when unsupported."
+                    },
+                    "supported": {
+                      "type": "boolean",
+                      "description": "False when no registered adapter accepts the asset."
+                    },
+                    "adapterId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Adapter that produced the summary, when supported."
+                    },
+                    "recordCount": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "description": "Records the adapter counted, when known."
+                    },
+                    "confidence": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "Detection confidence in 0..1, when supported."
+                    },
+                    "schema": {
+                      "description": "Detected field summary (names and types only — never sample values, which can carry patient data); null when unsupported.",
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "fields": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "nullable": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "assets:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/assets/{id}/content": {
+      "get": {
+        "operationId": "AssetsController.content",
+        "summary": "Download asset bytes",
+        "description": "Returns the exact uploaded bytes with `x-checksum` (the content-addressed SHA-256) and `etag` headers.\n\nRequires scope `assets:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The exact uploaded bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "assets:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mappings": {
+      "post": {
+        "operationId": "MappingsController.create",
+        "summary": "Create a mapping version",
+        "description": "Creates a mapping version. Versions are immutable: posting an existing `name` again creates version n+1, and a run references a mapping *id*, so editing a mapping can never silently change what an old run did. `spec.rules` must be an array.\n\nRequires scope `mappings:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The created mapping version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mapping": {
+                      "$ref": "#/components/schemas/Mapping"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:write",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Mapping to create.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "spec"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Slug; posting an existing name creates the next version."
+                  },
+                  "spec": {
+                    "type": "object",
+                    "required": [
+                      "rules"
+                    ],
+                    "description": "Mapping spec.",
+                    "properties": {
+                      "rules": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  },
+                  "sourceFormat": {
+                    "type": "string",
+                    "default": "auto"
+                  },
+                  "targetFormat": {
+                    "type": "string",
+                    "default": "fhir-r4"
+                  },
+                  "targetResourceType": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "MappingsController.list",
+        "summary": "List mappings",
+        "description": "Lists mapping versions for the workspace.\n\nRequires scope `mappings:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Mapping page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mappings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Mapping"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for the next page, or null."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items to return. Defaults are service-defined; values are bounded.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous `nextCursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mappings/{name}/versions": {
+      "get": {
+        "operationId": "MappingsController.versions",
+        "summary": "List versions of a mapping",
+        "description": "Lists every immutable version of the named mapping. Declared before `:id`, so a name is never captured as an id.\n\nRequires scope `mappings:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All versions of the mapping.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Mapping"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:read",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Mapping name (slug). Versions share the name; runs reference immutable ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mappings/{id}": {
+      "get": {
+        "operationId": "MappingsController.get",
+        "summary": "Get a mapping",
+        "description": "Returns one mapping version by id.\n\nRequires scope `mappings:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The mapping version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mapping": {
+                      "$ref": "#/components/schemas/Mapping"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/pipelines": {
+      "post": {
+        "operationId": "PipelinesController.create",
+        "summary": "Create a pipeline",
+        "description": "Creates a named combination of a mapping and engine options. A pipeline is a convenience for repeatable operations, not a second execution path: it resolves to a mapping id and options, and the run service executes that.\n\nRequires scope `pipelines:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Pipelines"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "The created pipeline.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pipeline": {
+                      "$ref": "#/components/schemas/Pipeline"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "pipelines:write",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Pipeline to create. The mapping must exist in the workspace.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "mappingId"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Slug."
+                  },
+                  "mappingId": {
+                    "type": "string"
+                  },
+                  "config": {
+                    "type": "object",
+                    "description": "Engine options applied at run creation.",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "PipelinesController.list",
+        "summary": "List pipelines",
+        "description": "Lists pipelines for the workspace.\n\nRequires scope `pipelines:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Pipelines"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pipeline page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pipelines": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Pipeline"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for the next page, or null."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "pipelines:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items to return. Defaults are service-defined; values are bounded.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous `nextCursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/pipelines/{id}": {
+      "get": {
+        "operationId": "PipelinesController.get",
+        "summary": "Get a pipeline",
+        "description": "Returns the pipeline plus the mapping it currently resolves to.\n\nRequires scope `pipelines:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Pipelines"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pipeline and its mapping.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pipeline": {
+                      "$ref": "#/components/schemas/Pipeline"
+                    },
+                    "mapping": {
+                      "$ref": "#/components/schemas/Mapping"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "pipelines:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs": {
+      "post": {
+        "operationId": "RunsController.create",
+        "summary": "Create a run (async, 202)",
+        "description": "Runs are created with 202 plus a run resource, never as a synchronous transform. The row is written before the job is persisted, so 202 always means a job exists. Allowed `options`: `maxRecords`, `importedAt` (ISO-8601 reproducibility anchor), `adapterId`, `pipelineVersion`. Anything else is rejected with `VALIDATION_FAILED`. If the worker queue refuses the job, the call returns 503 and the run is recorded as failed with `error.code = QUEUE_UNAVAILABLE`.\n\nRequires scope `runs:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The queued run, whether it was created now, and links to follow it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    "created": {
+                      "type": "boolean",
+                      "description": "False when the Idempotency-Key replayed an earlier request."
+                    },
+                    "links": {
+                      "type": "object",
+                      "properties": {
+                        "self": {
+                          "type": "string"
+                        },
+                        "events": {
+                          "type": "string"
+                        },
+                        "traces": {
+                          "type": "string"
+                        },
+                        "resources": {
+                          "type": "string"
+                        },
+                        "bundle": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Failure envelope with one of: `IDEMPOTENCY_CONFLICT` (422).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Failure envelope with one of: `QUEUE_UNAVAILABLE` (503).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:write",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "description": "Client-chosen key scoped to the workspace. Same key + same request returns the same run (`created: false`); same key + different request returns 422 `IDEMPOTENCY_CONFLICT`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Run inputs. Reference an asset plus a mapping (`mappingId` or `mappingName`) or a `pipelineId`.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "assetId"
+                ],
+                "properties": {
+                  "assetId": {
+                    "type": "string"
+                  },
+                  "mappingId": {
+                    "type": "string"
+                  },
+                  "mappingName": {
+                    "type": "string",
+                    "description": "Resolves to the latest version of the named mapping."
+                  },
+                  "pipelineId": {
+                    "type": "string"
+                  },
+                  "options": {
+                    "type": "object",
+                    "properties": {
+                      "maxRecords": {
+                        "type": "integer"
+                      },
+                      "importedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "adapterId": {
+                        "type": "string"
+                      },
+                      "pipelineVersion": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "RunsController.list",
+        "summary": "List runs",
+        "description": "Lists run summaries for the workspace. `status` must be a known lifecycle state when given.\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run summary page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunSummary"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for the next page, or null."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by lifecycle state: `queued`, `running`, `cancelling`, `cancelled`, `completed`, `completed_with_warnings`, `failed`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items to return. Defaults are service-defined; values are bounded.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous `nextCursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}": {
+      "get": {
+        "operationId": "RunsController.get",
+        "summary": "Get a run",
+        "description": "Returns the run row for the workspace.\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "RunsController.remove",
+        "summary": "Delete a finished run",
+        "description": "Hard-deletes a terminal run (`completed`, `completed_with_warnings`, `failed`, `cancelled`) together with its traces, resource index and queued job rows. Idempotency keys that created the run are freed, so the same key can create a new run afterwards. A live run returns 409 `RUN_NOT_TERMINAL`: cancel it first.\n\nRequires scope `runs:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deletion receipt and how many idempotency keys were freed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deleted",
+                    "runId",
+                    "idempotencyKeysFreed"
+                  ],
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    },
+                    "runId": {
+                      "type": "string"
+                    },
+                    "idempotencyKeysFreed": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `RUN_NOT_TERMINAL` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/resources": {
+      "get": {
+        "operationId": "RunsController.resources",
+        "summary": "Get run output resources",
+        "description": "Returns the stored output resources. When output exceeded the stored-result limit, `omitted` is true and the summary keeps the checksums and counts instead; re-run with `maxRecords` to materialise a subset.\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Output resources, or an omission report.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "omitted": {
+                      "type": "boolean"
+                    },
+                    "bytes": {
+                      "type": "integer"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/issues": {
+      "get": {
+        "operationId": "RunsController.issues",
+        "summary": "Get run issues",
+        "description": "Returns validation issues and rejected records for the run.\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Issues and rejected records.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "issues": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "rejected": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/traces": {
+      "get": {
+        "operationId": "RunsController.traces",
+        "summary": "Get run traces",
+        "description": "Returns the stored execution traces, up to the configured per-run limit. Trace payloads use the structural-by-default redaction policy (protocol v1.2).\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Traces and count.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "traces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/bundle": {
+      "get": {
+        "operationId": "RunsController.bundle",
+        "summary": "Get the run bundle (replay descriptor)",
+        "description": "A self-describing descriptor that never embeds payload bytes — safe to attach to a ticket and replay against the same input. Carries the mapping spec version the run executed plus the checksums a reproduction must match.\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bundle descriptor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunBundle"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/cancel": {
+      "post": {
+        "operationId": "RunsController.cancel",
+        "summary": "Cancel a run",
+        "description": "Cancellation is cooperative: an in-flight record finishes before the run stops, at stage boundaries. A run that already finished returns 409 `RUN_NOT_CANCELLABLE`; a row that changed or disappeared between read and write returns 409 `CONFLICT` / 404.\n\nRequires scope `runs:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The cancelled run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409), `RUN_NOT_CANCELLABLE` (409), `CANCELLED` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/pause": {
+      "post": {
+        "operationId": "RunsController.pause",
+        "summary": "Pause a live run after its current chunk",
+        "description": "Cooperative pause — not a cancel. The worker finishes its in-flight record chunk, persists a checkpoint (`stage` + next `recordIndex` + input/output checksums) on the run row, and holds its queue slot with status `running` and `progress.stage: paused`. `POST /runs/:id/resume` continues it; cancelling a paused run aborts it and drops the checkpoint. Pause handles are process-local (demo mode): only the replica running the job observes the request, at its next chunk boundary. A run that already finished, is cancelling, or is already paused returns 409 `CONFLICT`. Static replay (`POST /runs/:id/replay`) is a separate path and is never labelled live.\n\nRequires scope `runs:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pausing run plus its latest checkpoint, when one has been persisted yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    "checkpoint": {
+                      "$ref": "#/components/schemas/RunCheckpoint"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/resume": {
+      "post": {
+        "operationId": "RunsController.resume",
+        "summary": "Resume a paused live run from its checkpoint",
+        "description": "Continues a paused run from its persisted checkpoint with byte-identical output to an uninterrupted run. Resume is cooperative like pause: the worker continues at its next scheduling turn. A run that is not paused — including finished runs, and cancelled runs, which do not keep a checkpoint — returns 409 `CONFLICT`.\n\nRequires scope `runs:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resuming run plus the checkpoint it continues from.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    "checkpoint": {
+                      "$ref": "#/components/schemas/RunCheckpoint"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/replay": {
+      "post": {
+        "operationId": "RunsController.replay",
+        "summary": "Replay a run",
+        "description": "Creates a new run from the same asset, mapping and options.\n\nRequires scope `runs:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The new run and the id it was replayed from.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/components/schemas/Run"
+                    },
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "replayedFrom": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:write",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/runs/{id}/events": {
+      "get": {
+        "operationId": "RunsController.events",
+        "summary": "Stream run progress (SSE)",
+        "description": "Server-sent events for one run (`Accept: text/event-stream`). The stream sends the current snapshot first, so a client that connects late (or reconnects) is never blind, then forwards queue events and closes on a terminal state. Event types: `snapshot`, `queued`, `started`, `progress`, `warning`, `done`, `error`, `cancelled`, plus `ping` heartbeats. A terminal event is always sent, even to a late subscriber.\n\nRequires scope `runs:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event stream ending in a terminal event.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE frames (`text/event-stream`)."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "runs:read",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque resource id. Scoped to the workspace; a foreign id reads as 404, never 403.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "operationId": "AuditController.list",
+        "summary": "List audit events",
+        "description": "Append-only audit trail, tenant scoped. Owner-only: the trail names actors. Records workspace creation, key issue/rotate/revoke, asset upload, mapping and pipeline creation, run creation, cancellation and replay. An audit write failure is logged, never allowed to break the request.\n\nRequires scope `audit:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit event page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEvent"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Cursor for the next page, or null."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "audit:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Maximum items to return. Defaults are service-defined; values are bounded.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from a previous `nextCursor`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-key",
+        "description": "Workspace API key (`hb_…`)."
+      },
+      "BootstrapToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-bootstrap-token",
+        "description": "Operator-held bootstrap token for workspace provisioning only."
+      }
+    },
+    "schemas": {
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error",
+          "statusCode"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "properties": {
+              "code": {
+                "$ref": "#/components/schemas/ErrorCode",
+                "description": "Stable machine-readable code; documented per operation."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable detail. Never contains SQL, paths or stacks."
+              },
+              "requestId": {
+                "type": "string",
+                "description": "Echo this when reporting the failure."
+              },
+              "details": {
+                "description": "Optional machine-readable context (e.g. `requiredScope`, `runId`)."
+              }
+            }
+          },
+          "statusCode": {
+            "type": "integer",
+            "description": "Mirrors the HTTP status."
+          }
+        }
+      },
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "UNAUTHENTICATED",
+          "MALFORMED_KEY",
+          "REVOKED_KEY",
+          "EXPIRED_KEY",
+          "FORBIDDEN",
+          "RATE_LIMITED",
+          "NOT_FOUND",
+          "CONFLICT",
+          "DRAFT_CONFLICT",
+          "IDEMPOTENCY_CONFLICT",
+          "MAPPING_VALIDATION_FAILED",
+          "VALIDATION_FAILED",
+          "PAYLOAD_TOO_LARGE",
+          "UNSUPPORTED_MEDIA_TYPE",
+          "INVALID_JSON",
+          "CANCELLED",
+          "RUN_NOT_CANCELLABLE",
+          "RUN_NOT_TERMINAL",
+          "QUEUE_UNAVAILABLE",
+          "INTERNAL"
+        ],
+        "description": "Shared error taxonomy (`apps/api/src/common/errors.ts`)."
+      },
+      "Workspace": {
+        "type": "object",
+        "required": [
+          "id",
+          "slug",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string"
+          },
+          "retentionDays": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiKey": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "editor",
+              "viewer",
+              "service"
+            ]
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "keyPrefix": {
+            "type": "string",
+            "description": "Identifying prefix; the secret itself is never returned."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Asset": {
+        "type": "object",
+        "required": [
+          "id",
+          "checksum",
+          "sizeBytes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Asset id (`as_…`)."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "SHA-256 of the bytes (`sha256:…`). Matches the `x-checksum` header."
+          },
+          "filename": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Detected domain, or `unknown` when detection found nothing."
+          },
+          "sourceFormat": {
+            "type": "string",
+            "description": "Detected format, or `unknown`."
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Mapping": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "version",
+          "spec",
+          "specChecksum"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Mapping id (`mp_…`). Runs reference this, never the name."
+          },
+          "name": {
+            "type": "string",
+            "description": "Slug; posting an existing name creates the next version."
+          },
+          "version": {
+            "type": "integer"
+          },
+          "spec": {
+            "type": "object",
+            "description": "Mapping spec (`spec.rules` is an array).",
+            "additionalProperties": true
+          },
+          "specChecksum": {
+            "type": "string"
+          },
+          "sourceFormat": {
+            "type": "string"
+          },
+          "targetFormat": {
+            "type": "string"
+          },
+          "targetResourceType": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Pipeline": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "mappingId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Pipeline id (`pl_…`)."
+          },
+          "name": {
+            "type": "string"
+          },
+          "mappingId": {
+            "type": "string"
+          },
+          "config": {
+            "type": "object",
+            "description": "Engine options applied at run creation.",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Run": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunSummary"
+          }
+        ],
+        "description": "Full run row, including options, summary, validation and engine versions."
+      },
+      "RunSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "mappingId",
+          "recordsProcessed",
+          "recordsSucceeded",
+          "recordsFailed",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Run id (`run_…`)."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "cancelling",
+              "cancelled",
+              "completed",
+              "completed_with_warnings",
+              "failed"
+            ]
+          },
+          "mappingId": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "string"
+          },
+          "recordsProcessed": {
+            "type": "integer"
+          },
+          "recordsSucceeded": {
+            "type": "integer"
+          },
+          "recordsFailed": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "progress": {
+            "type": "object",
+            "description": "Stage progress; present while running.",
+            "additionalProperties": true
+          },
+          "error": {
+            "type": "object",
+            "description": "Failure detail; present when the run failed.",
+            "additionalProperties": true
+          }
+        }
+      },
+      "RunBundle": {
+        "type": "object",
+        "required": [
+          "bundleVersion",
+          "runId",
+          "engineVersion",
+          "traceProtocolVersion",
+          "input",
+          "expected"
+        ],
+        "description": "Self-describing replay descriptor. Never embeds payload bytes.",
+        "properties": {
+          "bundleVersion": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "apiVersion": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "engineVersion": {
+            "type": "string"
+          },
+          "traceProtocolVersion": {
+            "type": "string"
+          },
+          "pipelineVersion": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "adapter": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "mapping": {
+            "type": "object",
+            "description": "The mapping spec version the run executed.",
+            "additionalProperties": true
+          },
+          "mappingRef": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "options": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "expected": {
+            "type": "object",
+            "description": "Checksums and counts a reproduction must match.",
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "recordsProcessed": {
+                "type": "integer"
+              },
+              "recordsSucceeded": {
+                "type": "integer"
+              },
+              "recordsFailed": {
+                "type": "integer"
+              },
+              "outputChecksum": {
+                "type": "string"
+              },
+              "validationValid": {
+                "type": "boolean"
+              }
+            }
+          },
+          "environment": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "RunCheckpoint": {
+        "type": "object",
+        "required": [
+          "runId",
+          "stage",
+          "recordIndex",
+          "recordsProcessed",
+          "importedAt",
+          "updatedAt"
+        ],
+        "description": "Persisted resume cursor for a live run: the pipeline stage, the next record index, and the checksums that bind the checkpoint to one exact input and output prefix.",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "Run id (`run_…`)."
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "parse",
+              "mapping",
+              "paused",
+              "done"
+            ],
+            "description": "Pipeline stage the checkpoint was taken at."
+          },
+          "recordIndex": {
+            "type": "integer",
+            "description": "Zero-based index of the next record to process."
+          },
+          "recordsProcessed": {
+            "type": "integer",
+            "description": "Records processed when the checkpoint was taken."
+          },
+          "recordsTotal": {
+            "type": "integer",
+            "description": "Total records when known (after parsing)."
+          },
+          "inputChecksum": {
+            "type": "string",
+            "description": "Checksum of the run input; a resume with different bytes is refused."
+          },
+          "outputChecksumSoFar": {
+            "type": "string",
+            "description": "Checksum of the output prefix produced so far."
+          },
+          "adapterId": {
+            "type": "string"
+          },
+          "adapterVersion": {
+            "type": "string"
+          },
+          "importedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Effective provenance timestamp; a resume must reuse it for byte-identical output."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuditEvent": {
+        "type": "object",
+        "required": [
+          "action",
+          "outcome"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "actorKeyId": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "description": "One of `workspace.created`, `workspace.deletion_requested`, `key.issued`, `key.revoked`, `key.rotated`, `asset.uploaded`, `asset.deleted`, `mapping.created`, `pipeline.created`, `run.created`, `run.cancelled`, `run.deleted`, `run.replayed`, `retention.swept`. Workspace purges are recorded in the platform audit (`workspace.purged`), not the tenant trail."
+          },
+          "targetType": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure"
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "required": [
+          "status",
+          "mode",
+          "persistence"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "demo",
+              "database"
+            ]
+          },
+          "nodeEnv": {
+            "type": "string"
+          },
+          "persistence": {
+            "type": "string"
+          },
+          "storage": {
+            "type": "string"
+          },
+          "queue": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "limits": {
+            "type": "object",
+            "description": "Authoritative limits; clients must read these instead of hard-coding maximums.",
+            "properties": {
+              "maxUploadBytes": {
+                "type": "integer"
+              },
+              "maxRequestBodyBytes": {
+                "type": "integer"
+              },
+              "maxStoredResultBytes": {
+                "type": "integer"
+              },
+              "maxTracesPerRun": {
+                "type": "integer"
+              },
+              "rateLimit": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "queue": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "uptimeSeconds": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

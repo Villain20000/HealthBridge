@@ -58,8 +58,8 @@ function deepFreeze<T>(value: T): T {
 describe("shared mapping contracts", () => {
   test("TRANSFORM_FUNCTIONS equals MAPPING_TRANSFORM_KINDS in order", () => {
     assert.deepEqual(TRANSFORM_FUNCTIONS, MAPPING_TRANSFORM_KINDS);
-    assert.equal(TRANSFORM_FUNCTIONS.length, 13);
-    assert.equal(new Set(TRANSFORM_FUNCTIONS).size, 13);
+    assert.equal(TRANSFORM_FUNCTIONS.length, 14);
+    assert.equal(new Set(TRANSFORM_FUNCTIONS).size, 14);
   });
 });
 

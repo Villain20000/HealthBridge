@@ -1,6 +1,6 @@
-# Planned features — specs for everything not built yet
+# Planned features — specs for gaps not fully built yet
 
-Every document here describes a capability that **does not exist in the codebase**. They exist so
+Every document here describes a capability that **does not fully exist in the codebase** (shipped slices are marked ✅/🟡; fully shipped specs move to `docs/`). They exist so
 the gap is specified instead of implied: what the API can do today, what is missing, what the
 design is, and what "done" means.
 
@@ -14,15 +14,15 @@ If a feature is implemented, its document moves out of this folder and into `doc
 | [data-lineage.md](data-lineage.md) | Field-level lineage from source to FHIR output | D3 |
 | [fhir-validation-centre.md](fhir-validation-centre.md) | Profile/terminology validation and triage | F |
 | [asset-explorer.md](asset-explorer.md) | Browse stored records and resources | D3 |
-| [live-execution.md](live-execution.md) | Streaming upload/parse, pausable execution | C/F/G |
-| [adapter-wave.md](adapter-wave.md) | HL7 v2, CDA, XLSX, DICOM, FHIR REST, OMOP, VCF | E/F |
+| [live-execution.md](../live-execution.md) | Streaming upload/parse, pausable execution — v1 shipped | C/F/G |
+| [adapter-wave.md](../adapter-wave.md) | HL7 v2, CDA, XLSX, DICOM, FHIR REST, OMOP, VCF — landed as opt-in adapters | E/F |
 | [auth-bff-oidc.md](auth-bff-oidc.md) | Cookie-based BFF/OIDC instead of an in-memory key | D4 |
-| [openapi-client.md](openapi-client.md) | Committed OpenAPI document + generated client | C |
-| [queue-broker.md](queue-broker.md) | Redis/BullMQ (or similar) queue behind the same contract | C/F |
-| [storage-drivers.md](storage-drivers.md) | S3-compatible object storage | F |
+| [openapi-client.md](../openapi-client.md) | Committed OpenAPI document + generated client — shipped | C |
+| [queue-broker.md](queue-broker.md) | Redis/BullMQ opt-in exists; MySQL remains default | C/F |
+| [storage-drivers.md](../storage-drivers.md) | S3-compatible object storage — shipped | F |
 | [component-tests.md](component-tests.md) | Angular TestBed layer (Vitest or Karma) | D |
 | [multi-workspace.md](multi-workspace.md) | Workspace selection inside one session | D4 |
-| [hardening-and-release.md](hardening-and-release.md) | Security suite, benchmarks, docs site, release automation | F |
+| [hardening-and-release.md](../hardening-and-release.md) | Security suite, benchmarks, docs site, release automation — landed | F |
 
 ## Rules for promoting a document
 

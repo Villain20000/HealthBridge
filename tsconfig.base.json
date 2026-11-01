@@ -25,10 +25,12 @@
       "@healthbridge/mapping-engine": ["packages/mapping-engine/src/index.ts"],
       "@healthbridge/transformation-engine": ["packages/transformation-engine/src/index.ts"],
       "@healthbridge/fhir-r4": ["packages/fhir-r4/src/index.ts"],
+      "@healthbridge/fhir-ndjson": ["packages/fhir-ndjson/src/index.ts"],
       "@healthbridge/validation": ["packages/validation/src/index.ts"],
       "@healthbridge/lineage-engine": ["packages/lineage-engine/src/index.ts"],
       "@healthbridge/sdk": ["packages/sdk/src/index.ts"],
-      "@healthbridge/target-builders": ["packages/target-builders/src/index.ts"]
+      "@healthbridge/target-builders": ["packages/target-builders/src/index.ts"],
+      "@healthbridge/client": ["packages/client/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "dist"]

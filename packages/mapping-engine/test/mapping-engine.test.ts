@@ -102,6 +102,7 @@ describe("transforms", () => {
     };
     const extraParams: Record<string, Record<string, unknown>> = {
       codeable_concept: { system: "http://loinc.org" },
+      convert_units: { from: "mg/dL", to: "g/L" },
     };
     for (const kind of TRANSFORM_FUNCTIONS) {
       const outcome = applyTransform(
@@ -119,7 +120,7 @@ describe("transforms", () => {
       assert.equal(outcome.ok, true, `transform '${kind}' should succeed for a representative value`);
       assert.notEqual(outcome.value, undefined, `transform '${kind}' returned no value`);
     }
-    assert.equal(TRANSFORM_FUNCTIONS.length, 13);
+    assert.equal(TRANSFORM_FUNCTIONS.length, 14);
   });
 
   test("an unhandled transform kind is a hard error, not a silent pass-through", () => {

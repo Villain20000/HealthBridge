@@ -45,6 +45,17 @@ export const routes: Routes = [
         loadComponent: () => import("./features/runs/run-detail.page").then((m) => m.RunDetailPage),
       },
       {
+        path: "validation-centre/:runId",
+        title: "Validation Centre · HealthBridge",
+        loadComponent: () =>
+          import("./features/validation-centre/validation-centre.page").then((m) => m.ValidationCentrePage),
+      },
+      {
+        path: "lineage/:runId",
+        title: "Data lineage · HealthBridge",
+        loadComponent: () => import("./features/lineage/lineage.page").then((m) => m.LineagePage),
+      },
+      {
         path: "assets",
         title: "Assets · HealthBridge",
         loadComponent: () => import("./features/assets/assets.page").then((m) => m.AssetsPage),
@@ -53,6 +64,12 @@ export const routes: Routes = [
         path: "mappings",
         title: "Mappings · HealthBridge",
         loadComponent: () => import("./features/mappings/mappings.page").then((m) => m.MappingsPage),
+      },
+      {
+        path: "mapping-editor/:mappingId",
+        title: "Mapping editor · HealthBridge",
+        loadComponent: () =>
+          import("./features/mapping-editor/mapping-editor.page").then((m) => m.MappingEditorPage),
       },
       {
         path: "pipelines",

@@ -2,7 +2,7 @@
 
 Safe, declarative schema mapping engine for HealthBridge OS. Applies conditions and array-aware target paths with coverage and rejection reporting.
 
-**Status:** Delivered in v3.1.0 with 11 deterministic transforms.
+**Status:** Delivered in v3.1.0 with 14 deterministic transforms (incl. `convert_units` on a validated UCUM subset), rule-output chaining (`__rule.`) and opt-in cross-record context.
 
 ## Install
 

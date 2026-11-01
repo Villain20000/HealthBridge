@@ -72,6 +72,19 @@ export class MySqlApiKeyStore implements ApiKeyStore {
     params.push(id);
     await this.db.execute(`UPDATE api_keys SET ${assignments.join(", ")} WHERE id = ?`, params);
   }
+
+  public async revokeAll(workspaceId: string, revokedAt: string): Promise<number> {
+    const result = await this.db.execute(
+      `UPDATE api_keys SET revoked_at = ? WHERE workspace_id = ? AND revoked_at IS NULL`,
+      [toSql(revokedAt), workspaceId],
+    );
+    return result.affectedRows;
+  }
+
+  public async deleteByWorkspace(workspaceId: string): Promise<number> {
+    const result = await this.db.execute(`DELETE FROM api_keys WHERE workspace_id = ?`, [workspaceId]);
+    return result.affectedRows;
+  }
 }
 
 function toSql(iso: string): string {

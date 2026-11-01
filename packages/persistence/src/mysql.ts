@@ -14,12 +14,18 @@ import {
   PersistenceError,
   PipelineRecord,
   PipelineRepository,
+  PlatformAuditEvent,
+  PlatformAuditRepository,
+  RETENTION_BATCH_LIMIT,
   Repositories,
   RunRecord,
   RunRepository,
   RunStatus,
   RunTraceRecord,
+  TERMINAL_RUN_STATUSES,
   Workspace,
+  WorkspacePurgeRecord,
+  WorkspacePurgeRepository,
   WorkspaceRepository,
   normalisePage,
 } from "./domain.js";
@@ -188,6 +194,14 @@ export class MySqlWorkspaceRepository implements WorkspaceRepository {
     const page = buildPage(rows.map(mapWorkspace), limit);
     return page;
   }
+
+  public async softDelete(id: string, deletedAt: string): Promise<boolean> {
+    const result = await this.db.execute(`UPDATE workspaces SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`, [
+      toSqlDate(new Date(deletedAt)),
+      id,
+    ]);
+    return result.affectedRows > 0;
+  }
 }
 
 export class MySqlAssetRepository implements AssetRepository {
@@ -245,6 +259,26 @@ export class MySqlAssetRepository implements AssetRepository {
   public async delete(workspaceId: string, id: string): Promise<boolean> {
     const result = await this.db.execute(`DELETE FROM assets WHERE workspace_id = ? AND id = ?`, [workspaceId, id]);
     return result.affectedRows > 0;
+  }
+
+  public async listExpired(
+    workspaceId: string,
+    createdBefore: string,
+    limit = RETENTION_BATCH_LIMIT,
+  ): Promise<AssetRecord[]> {
+    const rows = await this.db.query(
+      `SELECT ${ASSET_COLUMNS} FROM assets
+       WHERE workspace_id = ? AND created_at < ?
+       ORDER BY created_at ASC, id ASC LIMIT ?`,
+      [workspaceId, toSqlDate(new Date(createdBefore)), limit],
+    );
+    return rows.map(mapAsset);
+  }
+
+  public async storageKeyInUse(storageKey: string): Promise<boolean> {
+    // Deliberately unscoped: storage is content-addressed across tenants.
+    const rows = await this.db.query(`SELECT 1 AS present FROM assets WHERE storage_key = ? LIMIT 1`, [storageKey]);
+    return rows.length > 0;
   }
 }
 
@@ -553,6 +587,37 @@ export class MySqlRunRepository implements RunRepository {
     return rows[0] ? mapRun(rows[0]) : undefined;
   }
 
+  public async delete(workspaceId: string, id: string): Promise<boolean> {
+    // Traces, resource-index rows and queued jobs cascade from the run.
+    const result = await this.db.execute(`DELETE FROM runs WHERE workspace_id = ? AND id = ?`, [workspaceId, id]);
+    return result.affectedRows > 0;
+  }
+
+  public async listExpired(
+    workspaceId: string,
+    finishedBefore: string,
+    limit = RETENTION_BATCH_LIMIT,
+  ): Promise<RunRecord[]> {
+    const terminal = TERMINAL_RUN_STATUSES.map(() => "?").join(", ");
+    const rows = await this.db.query(
+      `SELECT ${RUN_COLUMNS} FROM runs
+       WHERE workspace_id = ? AND status IN (${terminal})
+         AND COALESCE(finished_at, cancelled_at, created_at) < ?
+       ORDER BY COALESCE(finished_at, cancelled_at, created_at) ASC, id ASC
+       LIMIT ?`,
+      [workspaceId, ...TERMINAL_RUN_STATUSES, toSqlDate(new Date(finishedBefore)), limit],
+    );
+    return rows.map(mapRun);
+  }
+
+  public async countByAsset(workspaceId: string, assetId: string): Promise<number> {
+    const rows = await this.db.query<{ count: number | string }>(
+      `SELECT COUNT(*) AS count FROM runs WHERE workspace_id = ? AND asset_id = ?`,
+      [workspaceId, assetId],
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+
   public async update(workspaceId: string, id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined> {
     const assignments: string[] = [];
     const params: unknown[] = [];
@@ -784,6 +849,151 @@ export class MySqlIdempotencyStore implements IdempotencyStore {
       ],
     );
   }
+
+  public async deleteByResource(workspaceId: string, resourceType: string, resourceId: string): Promise<number> {
+    // Deleting the run must free its key: a tombstone for a resource that no
+    // longer exists would otherwise answer 422 forever.
+    const result = await this.db.execute(
+      `DELETE FROM idempotency_keys WHERE workspace_id = ? AND resource_type = ? AND resource_id = ?`,
+      [workspaceId, resourceType, resourceId],
+    );
+    return result.affectedRows;
+  }
+}
+
+export class MySqlWorkspacePurgeRepository implements WorkspacePurgeRepository {
+  constructor(private readonly db: SqlConnection) {}
+
+  public async schedule(record: WorkspacePurgeRecord): Promise<WorkspacePurgeRecord> {
+    await this.db.execute(
+      `INSERT INTO workspace_purges (workspace_id, workspace_slug, scheduled_at, requested_at, requested_by)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE workspace_slug = VALUES(workspace_slug), scheduled_at = VALUES(scheduled_at),
+         requested_at = VALUES(requested_at), requested_by = VALUES(requested_by)`,
+      [
+        record.workspaceId,
+        record.workspaceSlug,
+        toSqlDate(new Date(record.scheduledAt)),
+        toSqlDate(new Date(record.requestedAt)),
+        record.requestedBy ?? null,
+      ],
+    );
+    return record;
+  }
+
+  public async find(workspaceId: string): Promise<WorkspacePurgeRecord | undefined> {
+    const rows = await this.db.query(
+      `SELECT workspace_id, workspace_slug, scheduled_at, requested_at, requested_by
+       FROM workspace_purges WHERE workspace_id = ?`,
+      [workspaceId],
+    );
+    return rows[0] ? mapWorkspacePurge(rows[0]) : undefined;
+  }
+
+  public async listDue(now: string, limit = RETENTION_BATCH_LIMIT): Promise<WorkspacePurgeRecord[]> {
+    const rows = await this.db.query(
+      `SELECT workspace_id, workspace_slug, scheduled_at, requested_at, requested_by
+       FROM workspace_purges WHERE scheduled_at <= ?
+       ORDER BY scheduled_at ASC, workspace_id ASC LIMIT ?`,
+      [toSqlDate(new Date(now)), limit],
+    );
+    return rows.map(mapWorkspacePurge);
+  }
+
+  public async remove(workspaceId: string): Promise<boolean> {
+    const result = await this.db.execute(`DELETE FROM workspace_purges WHERE workspace_id = ?`, [workspaceId]);
+    return result.affectedRows > 0;
+  }
+
+  public async purge(workspaceId: string): Promise<string[]> {
+    return this.db.transaction(async (tx) => {
+      // Collected inside the transaction so the keys reported are the ones that
+      // were actually referenced when the tenant rows disappeared.
+      const rows = await tx.query<{ storage_key: string }>(`SELECT storage_key FROM assets WHERE workspace_id = ?`, [
+        workspaceId,
+      ]);
+      const keys = [...new Set(rows.map((row) => String(row.storage_key)))];
+
+      // Explicit deletes rather than trusting ON DELETE CASCADE: child rows
+      // without a workspace column (traces, resource index, jobs) only cascade
+      // through runs, and this keeps the purge correct if a FK changes.
+      await tx.execute(`DELETE FROM run_jobs WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM idempotency_keys WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM runs WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM pipelines WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM mapping_drafts WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM audit_events WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM assets WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM mappings WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM api_keys WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM workspace_purges WHERE workspace_id = ?`, [workspaceId]);
+      await tx.execute(`DELETE FROM workspaces WHERE id = ?`, [workspaceId]);
+      return keys;
+    });
+  }
+}
+
+export class MySqlPlatformAuditRepository implements PlatformAuditRepository {
+  constructor(private readonly db: SqlExecutor) {}
+
+  public async append(event: PlatformAuditEvent): Promise<PlatformAuditEvent> {
+    await this.db.execute(
+      `INSERT INTO platform_audit_events
+         (id, workspace_id, workspace_slug, actor_key_id, action, target_type, target_id, outcome, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        event.id,
+        event.workspaceId,
+        event.workspaceSlug ?? null,
+        event.actorKeyId ?? null,
+        event.action,
+        event.targetType ?? null,
+        event.targetId ?? null,
+        event.outcome,
+        json(event.metadata),
+        toSqlDate(new Date(event.createdAt)),
+      ],
+    );
+    return event;
+  }
+
+  public async list(request: PageRequest & { workspaceId?: string } = {}): Promise<Page<PlatformAuditEvent>> {
+    const { limit, cursor } = pageParams(request);
+    const filters: string[] = [];
+    const params: unknown[] = [];
+
+    if (request.workspaceId) {
+      filters.push("workspace_id = ?");
+      params.push(request.workspaceId);
+    }
+    if (cursor) {
+      filters.push("(created_at < ? OR (created_at = ? AND id < ?))");
+      params.push(toSqlDate(new Date(cursor.createdAt)), toSqlDate(new Date(cursor.createdAt)), cursor.id);
+    }
+
+    const rows = await this.db.query(
+      `SELECT id, workspace_id, workspace_slug, actor_key_id, action, target_type, target_id, outcome, metadata, created_at
+       FROM platform_audit_events ${filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : ""}
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+      [...params, limit + 1],
+    );
+
+    return buildPage(
+      rows.map((row) => ({
+        id: String(row.id),
+        workspaceId: String(row.workspace_id),
+        workspaceSlug: row.workspace_slug ? String(row.workspace_slug) : undefined,
+        actorKeyId: row.actor_key_id ? String(row.actor_key_id) : undefined,
+        action: String(row.action),
+        targetType: row.target_type ? String(row.target_type) : undefined,
+        targetId: row.target_id ? String(row.target_id) : undefined,
+        outcome: String(row.outcome) as PlatformAuditEvent["outcome"],
+        metadata: parseJson(row.metadata),
+        createdAt: fromSqlDate(row.created_at) ?? new Date().toISOString(),
+      })),
+      limit,
+    );
+  }
 }
 
 function mapWorkspace(row: Record<string, unknown>): Workspace {
@@ -796,6 +1006,16 @@ function mapWorkspace(row: Record<string, unknown>): Workspace {
     createdAt: fromSqlDate(row.created_at) ?? new Date().toISOString(),
     createdBy: row.created_by ? String(row.created_by) : undefined,
     deletedAt: fromSqlDate(row.deleted_at),
+  };
+}
+
+function mapWorkspacePurge(row: Record<string, unknown>): WorkspacePurgeRecord {
+  return {
+    workspaceId: String(row.workspace_id),
+    workspaceSlug: String(row.workspace_slug),
+    scheduledAt: fromSqlDate(row.scheduled_at) ?? new Date().toISOString(),
+    requestedAt: fromSqlDate(row.requested_at) ?? new Date().toISOString(),
+    requestedBy: row.requested_by ? String(row.requested_by) : undefined,
   };
 }
 
@@ -920,6 +1140,8 @@ export async function createMySqlRepositories(
     runs: new MySqlRunRepository(connection),
     audit: new MySqlAuditRepository(connection),
     idempotency: new MySqlIdempotencyStore(connection, options.now),
+    workspacePurges: new MySqlWorkspacePurgeRepository(connection),
+    platformAudit: new MySqlPlatformAuditRepository(connection),
     migrateRunner,
     close: async () => {
       await connection.close();

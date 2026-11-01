@@ -61,9 +61,9 @@ missing and why.
 | Run bundles, replay, traces and issues exposed over HTTP | ✅ | `/runs/:id/{bundle,replay,traces,issues}` |
 | Fail-fast configuration (production without DB, missing pepper, unreachable MySQL) | ✅ | `apps/api/src/config.ts`; database-mode smoke in CI |
 | Shared broker (Redis + BullMQ) with cross-replica workers | ➖ | not planned: `run_jobs` gives durable claiming across replicas; revisit only on queue fan-out needs (ADR-0004) |
-| OpenAPI document committed and diffed in CI | ⬜ | `docs/api.md` is the contract until then |
-| S3-compatible storage driver | ⬜ | local filesystem only |
-| Streaming uploads and streaming CSV parse | ⬜ | bodies and pipelines still buffer |
+| OpenAPI document committed and diffed in CI | ✅ | `docs/openapi.json` generated from controllers, CI fails on drift (not served over HTTP) |
+| S3-compatible storage driver | ✅ | `S3StorageDriver` + env config, auto-selected in `app.context` when configured with fail-fast refusal; local/memory remain the default |
+| Streaming uploads and streaming CSV parse | 🟡 | streaming CSV tokenization, bounded-memory pipeline batches and SDK streaming file input landed; API upload bodies still buffer within documented limits |
 
 The API stays **Partial** until the broker and OpenAPI items land: a single-replica queue is a
 real limitation for a platform that wants to claim horizontal scaling.
@@ -79,36 +79,36 @@ proxy, asset upload, mappings, API keys, audit log, dark/light themes, axe check
 Playwright journeys against the API and the Docker Compose stack. See
 [docs/console.md](docs/console.md).
 
-**Still open:** VS Code-style three-pane debugger over stored traces · trace timeline with
-virtualised events · field provenance and nested JSON diff · mapping studio (visual editor)
-· schema explorer · lineage view · validation centre · pipeline runs in the UI ·
-cookie-based BFF/OIDC instead of an in-memory API key.
+**Still open:** VS Code-style three-pane debugger extensions over stored traces · pipeline runs in the UI · cookie-based BFF/OIDC.
 
-Static trace replay must not be labelled as live execution; live pausable execution is
-Phase G.
+**Shipped:** rule-table mapping editor, read-only schema explorers, lineage view, validation centre, `GET /assets/:id/schema`.
 
-## Phase E — Adapter wave 1 — ⬜
 
-XLSX · generic XML and CDA metadata · HL7 v2 (ADT, ORU) · split FHIR NDJSON package ·
-FHIR REST client (paging, capability statement, SSRF allowlist) · DICOM metadata
+Static trace replay must not be labelled as live execution (standing rule); live pausable execution shipped (see Phase G below).
+
+
+## Phase E — Adapter wave 1 — ✅ (opt-in adapters; NDJSON split into its own package)
+
+XLSX ✅ · generic XML and CDA metadata ✅ · HL7 v2 (ADT, ORU) ✅ · FHIR NDJSON split into `@healthbridge/fhir-ndjson` ✅ ·
+FHIR REST client ✅ (paging, capability statement, SSRF allowlist) · DICOM metadata ✅
 (explicit/implicit VR, private tags, PHI tag policy) · adapter development kit and shared
 conformance test suite.
 
-## Phase F — Domain depth and hardening — ⬜
+## Phase F — Domain depth and hardening — 🟡 (adapters, UCUM, terminology wiring, security suite, benchmarks landed)
 
-MySQL connector (read-only, streaming) · OMOP CDM staging subset · VCF metadata and variants ·
-FASTA/FASTQ metadata · PDF metadata with opt-in text extraction · version-aware terminology
-adapters (LOINC, SNOMED CT, ICD-10/11, UCUM, RxNorm, ATC) with licence-aware loading ·
-external FHIR validator adapter (profile + terminology levels) · security test suite
-(XXE, zip bombs, oversized inputs, tenant isolation) · benchmarks · docs site · release
+MySQL connector (read-only, streaming) ✅ · OMOP CDM staging subset ✅ · VCF metadata and variants ✅ ·
+FASTA/FASTQ metadata ✅ · PDF metadata with opt-in text extraction ✅ · rule chaining + cross-record context ✅ · UCUM `convert_units` ✅ · streaming CSV + bounded pipeline ✅ · terminology: local code-table provider ✅
+(operator-supplied tables; licensed-server integration for LOINC/SNOMED/ICD/RxNorm/ATC still open) ·
+external FHIR validator adapter ✅ (opt-in, SSRF allowlist) · terminology level-5 executes when a provider is injected · security test suite ✅
+(XXE, zip bombs, oversized inputs, tenant isolation) · benchmarks ✅ · plugin manifest gating ✅ · @healthbridge/client ✅ · docs site ✅ · release
 automation.
 
 ## Phase G — Later — ⬜
 
-EDF/WFDB metadata · MIABIS and biobank lineage graph · CDISC/ODM study metadata ·
-public-health jurisdiction plugins · DICOMweb (QIDO/WADO/STOW) · live pausable execution
-(requires real checkpoint and cancellation semantics; static trace replay must not be
-labelled as live execution).
+EDF/WFDB metadata ✅ (metadata-only ingester) · MIABIS profiles ✅ (opt-in validators; biobank flows reuse the generic lineage view) · CDISC/ODM study metadata ✅ (metadata-only) ·
+public-health jurisdiction plugins (remaining) · DICOMweb ✅ (read-only QIDO/WADO, SSRF allowlist) · live pausable execution ✅ (chunked checkpoints, pause/resume; v1 process-local, replay untouched)
+(checkpoint semantics verified; static trace replay is never labelled live — kept as the standing rule).
+Phase G header stays open until public-health jurisdiction plugins land.
 
 ---
 

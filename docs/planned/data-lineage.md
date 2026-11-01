@@ -1,6 +1,6 @@
 # Data Lineage Explorer — planned
 
-**Status:** ⬜ not implemented · **Phase:** D3 · **UI today:** provenance is only visible per
+**Status:** 🟡 shipped read-only (`lineage/:runId` over stored traces); declared per-rule lineage still planned · **Phase:** D3 · **UI today:** provenance is only visible per
 event inside the stored-trace debugger.
 
 ## Why it matters

@@ -13,6 +13,9 @@ import type { RunStatus } from "@healthbridge/shared-types";
 
 export type { RunStatus };
 
+/** Statuses a run can never leave; retention may delete rows in these states. */
+export const TERMINAL_RUN_STATUSES: RunStatus[] = ["completed", "completed_with_warnings", "failed", "cancelled"];
+
 export interface Workspace {
   id: string;
   slug: string;
@@ -175,6 +178,8 @@ export interface Page<T> {
 
 export const DEFAULT_PAGE_SIZE = 25;
 export const MAX_PAGE_SIZE = 100;
+/** Upper bound for one retention batch, so a sweep never holds an unbounded result. */
+export const RETENTION_BATCH_LIMIT = 500;
 
 interface CursorPayload {
   createdAt: string;
@@ -218,6 +223,8 @@ export interface WorkspaceRepository {
   findById(id: string): Promise<Workspace | undefined>;
   findBySlug(slug: string): Promise<Workspace | undefined>;
   list(request?: PageRequest): Promise<Page<Workspace>>;
+  /** Marks the workspace deleted without removing its data; the purge does that later. */
+  softDelete(id: string, deletedAt: string): Promise<boolean>;
 }
 
 export interface AssetRepository {
@@ -225,6 +232,14 @@ export interface AssetRepository {
   findById(workspaceId: string, id: string): Promise<AssetRecord | undefined>;
   list(workspaceId: string, request?: PageRequest): Promise<Page<AssetRecord>>;
   delete(workspaceId: string, id: string): Promise<boolean>;
+  /** Assets created before the cutoff, oldest first. Used by retention. */
+  listExpired(workspaceId: string, createdBefore: string, limit?: number): Promise<AssetRecord[]>;
+  /**
+   * Cross-tenant read by design: storage is content-addressed, so identical bytes
+   * in two workspaces share one object. Orphan collection must consider every
+   * tenant before deleting a blob.
+   */
+  storageKeyInUse(storageKey: string): Promise<boolean>;
 }
 
 export interface MappingRepository {
@@ -257,6 +272,11 @@ export interface RunRepository {
   list(workspaceId: string, request?: PageRequest & { status?: RunStatus }): Promise<Page<RunRecord>>;
   appendTraces(workspaceId: string, runId: string, traces: Omit<RunTraceRecord, "runId">[]): Promise<number>;
   listTraces(workspaceId: string, runId: string): Promise<RunTraceRecord[]>;
+  /** Removes the run and every child row (traces, resource index, jobs). */
+  delete(workspaceId: string, id: string): Promise<boolean>;
+  /** Terminal runs finished before the cutoff, oldest first. Used by retention. */
+  listExpired(workspaceId: string, finishedBefore: string, limit?: number): Promise<RunRecord[]>;
+  countByAsset(workspaceId: string, assetId: string): Promise<number>;
 }
 
 export interface AuditRepository {
@@ -267,6 +287,53 @@ export interface AuditRepository {
 export interface IdempotencyStore {
   get(workspaceId: string, key: string): Promise<IdempotencyRecord | undefined>;
   save(record: IdempotencyRecord): Promise<void>;
+  /** Frees the keys that indexed a resource that no longer exists. */
+  deleteByResource(workspaceId: string, resourceType: string, resourceId: string): Promise<number>;
+}
+
+export interface WorkspacePurgeRecord {
+  workspaceId: string;
+  workspaceSlug: string;
+  /** When the workspace may be hard-deleted. */
+  scheduledAt: string;
+  requestedAt: string;
+  requestedBy?: string;
+}
+
+export interface WorkspacePurgeRepository {
+  schedule(record: WorkspacePurgeRecord): Promise<WorkspacePurgeRecord>;
+  find(workspaceId: string): Promise<WorkspacePurgeRecord | undefined>;
+  /** Purges due at or before `now`, earliest first. */
+  listDue(now: string, limit?: number): Promise<WorkspacePurgeRecord[]>;
+  remove(workspaceId: string): Promise<boolean>;
+  /**
+   * Hard-deletes the workspace and every tenant row. Returns the content-addressed
+   * storage keys that were referenced by its assets; the caller deletes an object
+   * only after checking it is not shared with another workspace.
+   */
+  purge(workspaceId: string): Promise<string[]>;
+}
+
+/**
+ * Platform-level audit that survives workspace deletion. The tenant audit trail
+ * cascades with the workspace; records of deletion and purge must not.
+ */
+export interface PlatformAuditEvent {
+  id: string;
+  workspaceId: string;
+  workspaceSlug?: string;
+  actorKeyId?: string;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  outcome: "success" | "failure";
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface PlatformAuditRepository {
+  append(event: PlatformAuditEvent): Promise<PlatformAuditEvent>;
+  list(request?: PageRequest & { workspaceId?: string }): Promise<Page<PlatformAuditEvent>>;
 }
 
 export interface Repositories {
@@ -281,6 +348,8 @@ export interface Repositories {
   runs: RunRepository;
   audit: AuditRepository;
   idempotency: IdempotencyStore;
+  workspacePurges: WorkspacePurgeRepository;
+  platformAudit: PlatformAuditRepository;
   close(): Promise<void>;
 }
 

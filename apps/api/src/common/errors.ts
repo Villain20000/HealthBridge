@@ -27,6 +27,7 @@ export type ApiErrorCode =
   | "INVALID_JSON"
   | "CANCELLED"
   | "RUN_NOT_CANCELLABLE"
+  | "RUN_NOT_TERMINAL"
   | "QUEUE_UNAVAILABLE"
   | "INTERNAL";
 
@@ -48,6 +49,7 @@ const STATUS: Record<ApiErrorCode, number> = {
   INVALID_JSON: 400,
   CANCELLED: 409,
   RUN_NOT_CANCELLABLE: 409,
+  RUN_NOT_TERMINAL: 409,
   QUEUE_UNAVAILABLE: 503,
   INTERNAL: 500,
 };

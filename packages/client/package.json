@@ -1,0 +1,45 @@
+{
+  "name": "@healthbridge/client",
+  "version": "3.2.0",
+  "description": "Typed fetch-based REST client for the HealthBridge OS API (v1)",
+  "keywords": [
+    "healthcare",
+    "fhir",
+    "sdk",
+    "typescript",
+    "interoperability",
+    "rest",
+    "client"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Villain20000/HealthBridge.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/Villain20000/HealthBridge/tree/main/packages/client#readme",
+  "bugs": {
+    "url": "https://github.com/Villain20000/HealthBridge/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "HealthBridge OS Contributors",
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

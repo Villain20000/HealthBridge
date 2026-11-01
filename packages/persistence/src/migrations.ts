@@ -257,6 +257,45 @@ export const MIGRATIONS: Migration[] = [
       ) ${TABLE_OPTIONS}`,
     ],
   },
+  {
+    version: 5,
+    name: "workspace_purges",
+    statements: [
+      // Deletion is two-phase: the workspace row is soft-deleted immediately (so
+      // a mistake has a grace period), and this row records when the hard purge
+      // becomes due. The FK only cascades the schedule when the purge itself
+      // removes the workspace.
+      `CREATE TABLE IF NOT EXISTS workspace_purges (
+        workspace_id VARCHAR(32) NOT NULL,
+        workspace_slug VARCHAR(64) NOT NULL,
+        scheduled_at DATETIME(3) NOT NULL,
+        requested_at DATETIME(3) NOT NULL,
+        requested_by VARCHAR(64) NULL,
+        PRIMARY KEY (workspace_id),
+        KEY idx_workspace_purges_due (scheduled_at, workspace_id),
+        CONSTRAINT fk_workspace_purges_workspace FOREIGN KEY (workspace_id)
+          REFERENCES workspaces (id) ON DELETE CASCADE
+      ) ${TABLE_OPTIONS}`,
+
+      // Deliberately no foreign key: the record of a deletion must outlive the
+      // workspace it describes, so tenant deletion cannot erase its own audit.
+      `CREATE TABLE IF NOT EXISTS platform_audit_events (
+        id VARCHAR(32) NOT NULL,
+        workspace_id VARCHAR(32) NOT NULL,
+        workspace_slug VARCHAR(64) NULL,
+        actor_key_id VARCHAR(32) NULL,
+        action VARCHAR(64) NOT NULL,
+        target_type VARCHAR(64) NULL,
+        target_id VARCHAR(64) NULL,
+        outcome VARCHAR(16) NOT NULL,
+        metadata JSON NULL,
+        created_at DATETIME(3) NOT NULL,
+        PRIMARY KEY (id),
+        KEY idx_platform_audit_created (created_at, id),
+        KEY idx_platform_audit_workspace (workspace_id, created_at, id)
+      ) ${TABLE_OPTIONS}`,
+    ],
+  },
 ];
 
 export function migrationChecksum(migration: Migration): string {

@@ -185,6 +185,7 @@ and never returned.
 | --- | --- | --- |
 | POST | `/workspaces` | bootstrap token |
 | GET | `/workspaces/current` | `runs:read` |
+| DELETE | `/workspaces/current` | `workspaces:admin` |
 | POST | `/keys` | `workspaces:admin` |
 | GET | `/keys` | `workspaces:admin` |
 | DELETE | `/keys/:id` | `workspaces:admin` |
@@ -204,6 +205,7 @@ curl -s localhost:3000/api/v1/workspaces \
 | POST | `/assets?filename=patients.csv` | `assets:write` |
 | GET | `/assets` | `assets:read` |
 | GET | `/assets/:id` | `assets:read` |
+| DELETE | `/assets/:id` | `assets:write` |
 | GET | `/assets/:id/content` | `assets:read` |
 
 Uploads are **raw bytes**, not multipart:
@@ -288,12 +290,15 @@ The Studio editor works on a server-side **draft** of a mapping, one per workspa
 | POST | `/runs` | `runs:write` |
 | GET | `/runs?status=&limit=&cursor=` | `runs:read` |
 | GET | `/runs/:id` | `runs:read` |
+| DELETE | `/runs/:id` | `runs:write` |
 | GET | `/runs/:id/resources` | `runs:read` |
 | GET | `/runs/:id/issues` | `runs:read` |
 | GET | `/runs/:id/traces` | `runs:read` |
 | GET | `/runs/:id/bundle` | `runs:read` |
 | GET | `/runs/:id/events` | `runs:read` (SSE) |
 | POST | `/runs/:id/cancel` | `runs:write` |
+| POST | `/runs/:id/pause` | `runs:write` |
+| POST | `/runs/:id/resume` | `runs:write` |
 | POST | `/runs/:id/replay` | `runs:write` |
 
 ```bash
@@ -314,8 +319,54 @@ anchor), `adapterId`, `pipelineVersion`. Anything else is rejected with
 | GET | `/audit` | `audit:read` (owner) |
 
 Append-only, tenant-scoped. Records workspace creation, key issue/rotate/revoke,
-asset upload, mapping and pipeline creation, run creation, cancellation and
-replay. An audit write failure is logged, never allowed to break the request.
+asset upload and deletion, mapping and pipeline creation, run creation, cancellation,
+deletion and replay, and retention sweeps. An audit write failure is logged, never
+allowed to break the request. Workspace deletion requests and purges are additionally
+written to a platform audit that survives the workspace it describes.
+
+## Deletion and retention
+
+Three delete routes, all hard deletes. Every one writes an audit event.
+
+- `DELETE /assets/:id` (`assets:write`) deletes the asset metadata row. It is refused
+  with `409 CONFLICT` while any run in the workspace references the asset — delete or
+  retain those runs first. The content-addressed object is removed only when no asset
+  in **any** workspace references the same bytes; `blobDeleted` reports the outcome, so
+  one tenant deleting an upload never blanks another tenant's identical file.
+- `DELETE /runs/:id` (`runs:write`) deletes a terminal run (`completed`,
+  `completed_with_warnings`, `failed`, `cancelled`) with its traces, resource-index rows
+  and queued job. A live run returns `409 RUN_NOT_TERMINAL`; cancel it first. The
+  idempotency keys that created the run are freed (`idempotencyKeysFreed`), so the same
+  key can create a new run afterwards.
+- `DELETE /workspaces/current` (`workspaces:admin`, owner) requires
+  `{"confirm":"<workspace-slug>"}`. A wrong slug returns `400 VALIDATION_FAILED` and
+  changes nothing. On success the workspace is soft-deleted, every key in it revoked,
+  and a hard purge scheduled after `HEALTHBRIDGE_WORKSPACE_GRACE_DAYS`. Data is retained
+  during the grace period so an operator can intervene. The purge removes the workspace
+  and every tenant row — including the tenant audit trail — and keeps a
+  `workspace.purged` record in the platform audit.
+
+### Retention sweep
+
+The API runs a retention sweep every `HEALTHBRIDGE_RETENTION_SWEEP_MS` (default hourly;
+`0` disables the timer and leaves retention manual). Each workspace is swept when its
+`retentionDays` is greater than `0` (default `90`; `0` keeps everything):
+
+1. terminal runs whose finish time (or creation time) is older than the cutoff are
+   deleted in bounded batches; traces and index rows cascade and idempotency keys are
+   freed;
+2. assets created before the cutoff with no remaining run reference are deleted, and
+   their object is removed when no other workspace references it.
+
+Assets still feeding a retained run are skipped, so provenance is never blanked. Each
+sweep writes one `retention.swept` audit event per workspace that lost data. The sweep is
+idempotent — running it twice deletes nothing the second time — and a failure in one
+workspace is logged and skipped without aborting the others.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HEALTHBRIDGE_RETENTION_SWEEP_MS` | `3600000` | Sweep interval in ms; `0` disables the timer |
+| `HEALTHBRIDGE_WORKSPACE_GRACE_DAYS` | `7` | Days between a deletion request and the hard purge |
 
 ## Run lifecycle
 
@@ -397,13 +448,16 @@ Stated here rather than discovered in an incident:
   `run_jobs` table: jobs survive a restart, leases expire and are recovered, and
   several replicas can claim from the same table without duplicating work (ADR-0004).
   In demo mode (no `DATABASE_URL`) the queue is in-process, so jobs are lost on restart
-  and are not shared between replicas. A Redis/BullMQ adapter is **not planned**: the
-  table already provides restart safety and cross-replica claiming; it would be revisited
-  only if queue fan-out demands it (ADR-0004).
+  and are not shared between replicas. A Redis/BullMQ driver exists as an opt-in
+  (`HEALTHBRIDGE_REDIS_URL`/`REDIS_URL` selects it; unreachable Redis fails fast at
+  boot, never silently falls back); the MySQL `run_jobs` table remains the default (ADR-0004).
 - **No streaming uploads.** A body is buffered up to
   `HEALTHBRIDGE_MAX_UPLOAD_BYTES` before it is hashed and stored.
-- **No OpenAPI document is served yet.** This file is the contract; schema
-  generation is planned.
+- **The machine contract is [docs/openapi.json](openapi.json)** (OpenAPI 3.1),
+  generated from the controllers by `apps/api/src/generate-openapi.ts`
+  (`npx tsx apps/api/src/generate-openapi.ts --check` fails on drift, and CI
+  runs that check). This file keeps the narrative; the JSON file is the
+  contract clients code against. The document is not served over HTTP.
 - **Cancellation cannot interrupt a single record.** It stops at stage
   boundaries only.
 - **No PHI redaction of stored output.** The engine redacts trace payloads, but

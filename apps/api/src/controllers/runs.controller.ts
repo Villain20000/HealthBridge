@@ -1,11 +1,33 @@
-import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Query, Req, Sse } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Header,
+  Headers,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Query,
+  Req,
+  Sse,
+} from "@nestjs/common";
 import type { MessageEvent } from "@nestjs/common";
 import { Observable } from "rxjs";
 import type { Principal } from "@healthbridge/auth";
 import type { RunStatus } from "@healthbridge/persistence";
 import { ENGINE_VERSION, TRACE_PROTOCOL_VERSION } from "@healthbridge/shared-types";
 import { CurrentPrincipal, RequiresScope, type AuthenticatedRequest } from "../common/auth.guard.js";
-import { validationFailed } from "../common/errors.js";
+import { ApiError, validationFailed } from "../common/errors.js";
+import {
+  dropLiveHandle,
+  isPausedProgress,
+  liveRunHandles,
+  readLiveCheckpoint,
+  requestLivePause,
+  requestLiveResume,
+} from "../jobs/run-worker.js";
 import { optionalRecord, parseCursor, parseLimit, requireObject, requireString } from "../common/validate.js";
 import { isTerminal } from "../services/run.service.js";
 import type { RunEvent } from "../jobs/run-queue.js";
@@ -95,6 +117,21 @@ export class RunsController {
     return { run };
   }
 
+  @RequiresScope("runs:write")
+  @Delete(":id")
+  public async remove(
+    @CurrentPrincipal() principal: Principal,
+    @Param("id") id: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.ctx.retention.deleteRun({
+      principal,
+      runId: id,
+      requestId: request.requestId,
+      ip: request.ip,
+    });
+  }
+
   @RequiresScope("runs:read")
   @Get(":id/resources")
   public async resources(@CurrentPrincipal() principal: Principal, @Param("id") id: string) {
@@ -177,6 +214,88 @@ export class RunsController {
   ) {
     const run = await this.ctx.runs.cancel(principal, id, { requestId: request.requestId, ip: request.ip });
     return { run, note: "Cancellation is cooperative: an in-flight record is finished before the run stops." };
+  }
+
+  /**
+   * Pause a live run after its current record chunk.
+   *
+   * Pause is not cancel: the worker finishes the in-flight chunk, persists a
+   * checkpoint (`stage` + next `recordIndex` + input/output checksums) on the
+   * run row, and holds its queue slot with status `running` and
+   * `progress.stage: "paused"`. `POST /runs/:id/resume` continues it;
+   * cancelling a paused run aborts it and drops the checkpoint.
+   *
+   * Demo-mode semantics: pause handles are process-local — only the replica
+   * running the job observes the request, at its next chunk boundary. A run
+   * that already finished (or was never pausable) returns 409, never a silent
+   * no-op. Static replay (`POST /runs/:id/replay`) is a separate path and is
+   * never labelled live.
+   */
+  @RequiresScope("runs:write")
+  @Post(":id/pause")
+  @HttpCode(200)
+  public async pause(@CurrentPrincipal() principal: Principal, @Param("id") id: string) {
+    const run = await this.ctx.runs.get(principal.workspaceId, id);
+    if (isTerminal(run.status) || run.status === "cancelling") {
+      dropLiveHandle(run.id);
+      throw new ApiError("CONFLICT", `Run ${id} is ${run.status} and cannot be paused.`);
+    }
+    if (run.status !== "queued" && run.status !== "running") {
+      throw new ApiError("CONFLICT", `Run ${id} is ${run.status} and cannot be paused.`);
+    }
+    if (isPausedProgress(run)) {
+      throw new ApiError("CONFLICT", `Run ${id} is already paused.`);
+    }
+    requestLivePause(run.id);
+    // The run may have finished between the read and the flag write; a pause
+    // that lands on a terminal run is a 409, not a stale handle left behind.
+    // (A row that already reads `paused` here was paused by this very request,
+    // so it is success, not a conflict — only a pre-existing pause 409s.)
+    const current = await this.ctx.runs.get(principal.workspaceId, id);
+    if (isTerminal(current.status)) {
+      dropLiveHandle(current.id);
+      throw new ApiError("CONFLICT", `Run ${id} is ${current.status} and cannot be paused.`);
+    }
+    const summary = (current.summary ?? {}) as { checkpoint?: unknown };
+    return {
+      run: current,
+      checkpoint: readLiveCheckpoint(current.id) ?? summary.checkpoint,
+      note: "Pause is cooperative: the run stops after its current chunk and keeps its checkpoint for resume.",
+    };
+  }
+
+  /**
+   * Resume a paused live run from its persisted checkpoint.
+   *
+   * A run that is not paused — including finished runs and cancelled runs,
+   * which do not keep a checkpoint — returns 409. Resume is cooperative like
+   * pause: the worker continues at its next scheduling turn.
+   */
+  @RequiresScope("runs:write")
+  @Post(":id/resume")
+  @HttpCode(200)
+  public async resume(@CurrentPrincipal() principal: Principal, @Param("id") id: string) {
+    const run = await this.ctx.runs.get(principal.workspaceId, id);
+    if (isTerminal(run.status)) {
+      dropLiveHandle(run.id);
+      throw new ApiError(
+        "CONFLICT",
+        `Run ${id} is ${run.status} and cannot be resumed. Cancelled runs do not keep a checkpoint.`,
+      );
+    }
+    const handle = liveRunHandles.get(run.id);
+    const paused = isPausedProgress(run) || handle?.pauseRequested === true;
+    if (!paused) {
+      throw new ApiError("CONFLICT", `Run ${id} is not paused.`);
+    }
+    requestLiveResume(run.id);
+    const current = await this.ctx.runs.get(principal.workspaceId, id);
+    const summary = (current.summary ?? {}) as { checkpoint?: unknown };
+    return {
+      run: current,
+      checkpoint: readLiveCheckpoint(current.id) ?? summary.checkpoint,
+      note: "Resume is cooperative: the run continues from its checkpoint with byte-identical output.",
+    };
   }
 
   @RequiresScope("runs:write")

@@ -7,7 +7,9 @@ import {
   MySqlMappingDraftRepository,
   MySqlMappingRepository,
   MySqlPipelineRepository,
+  MySqlPlatformAuditRepository,
   MySqlRunRepository,
+  MySqlWorkspacePurgeRepository,
   MySqlWorkspaceRepository,
   PersistenceError,
   RecordingSqlConnection,
@@ -323,6 +325,148 @@ describe("mysql repositories: tenant scoping", () => {
 
     const decoded = JSON.parse(Buffer.from(page.nextCursor!, "base64url").toString("utf-8"));
     assert.equal(decoded.id, "as_1");
+  });
+
+  test("run deletion, expiry listing and asset counts stay scoped", async () => {
+    const db = new RecordingSqlConnection();
+    const repo = new MySqlRunRepository(db);
+
+    await repo.delete(workspaceId, runId);
+    await repo.listExpired(workspaceId, "2024-03-01T00:00:00.000Z", 25);
+    await repo.countByAsset(workspaceId, "as_1");
+
+    for (const statement of db.statements) {
+      assert.match(statement.sql, /workspace_id = \?/, `unscoped statement: ${statement.sql}`);
+      assert.equal(placeholders(statement.sql), statement.params.length, `placeholder mismatch: ${statement.sql}`);
+      assert.ok(statement.params.includes(workspaceId), "workspace id must be a bound parameter");
+      assert.ok(!statement.sql.includes(workspaceId), "workspace id must never be interpolated");
+    }
+
+    const deletion = db.statements.find((s) => s.sql.startsWith("DELETE FROM runs"));
+    assert.ok(deletion);
+    assert.match(deletion!.sql, /WHERE workspace_id = \? AND id = \?$/);
+    assert.deepEqual(deletion!.params, [workspaceId, runId]);
+
+    const expired = db.statements.find((s) => s.sql.includes("COALESCE(finished_at"));
+    assert.ok(expired);
+    assert.match(expired!.sql, /status IN \(/);
+    assert.equal(expired!.params.at(-1), 25, "the batch size is a bound parameter");
+  });
+
+  test("asset retention lookups are scoped, blob reference counting is deliberately global", async () => {
+    const db = new RecordingSqlConnection();
+    const repo = new MySqlAssetRepository(db);
+
+    await repo.listExpired(workspaceId, "2024-03-01T00:00:00.000Z", 10);
+    const expired = db.statements[0];
+    assert.match(expired.sql, /workspace_id = \? AND created_at < \?/);
+    assert.deepEqual(expired.params, [workspaceId, "2024-03-01 00:00:00.000", 10]);
+    assert.equal(placeholders(expired.sql), expired.params.length);
+
+    const key = "sha256/aa/" + "a".repeat(64);
+    assert.equal(await repo.storageKeyInUse(key), false);
+    const check = db.statements[1];
+    assert.match(check.sql, /storage_key = \?/);
+    assert.deepEqual(check.params, [key]);
+    assert.ok(!check.sql.includes("workspace_id"), "content-addressed blobs are shared across tenants");
+  });
+
+  test("idempotency cleanup by resource is scoped and fully bound", async () => {
+    const db = new RecordingSqlConnection();
+    const store = new MySqlIdempotencyStore(db);
+
+    // The recorder always reports one affected row; the point here is the statement.
+    assert.equal(await store.deleteByResource(workspaceId, "run", runId), 1);
+    const statement = db.statements[0];
+    assert.match(
+      statement.sql,
+      /DELETE FROM idempotency_keys WHERE workspace_id = \? AND resource_type = \? AND resource_id = \?/,
+    );
+    assert.deepEqual(statement.params, [workspaceId, "run", runId]);
+  });
+
+  test("workspace soft delete, purge schedules and platform audit are bound", async () => {
+    const db = new RecordingSqlConnection();
+    const workspaces = new MySqlWorkspaceRepository(db);
+    const purges = new MySqlWorkspacePurgeRepository(db);
+    const platformAudit = new MySqlPlatformAuditRepository(db);
+
+    assert.equal(await workspaces.softDelete(workspaceId, "2024-04-01T00:00:00.000Z"), true);
+    await purges.schedule({
+      workspaceId,
+      workspaceSlug: "acme",
+      scheduledAt: "2024-04-08T00:00:00.000Z",
+      requestedAt: "2024-04-01T00:00:00.000Z",
+      requestedBy: "key_1",
+    });
+    await purges.find(workspaceId);
+    await purges.listDue("2024-04-08T00:00:00.000Z", 10);
+    await purges.remove(workspaceId);
+    await platformAudit.append({
+      id: "pau_1",
+      workspaceId,
+      workspaceSlug: "acme",
+      action: "workspace.deletion_requested",
+      outcome: "success",
+      createdAt: "2024-04-01T00:00:00.000Z",
+    });
+    await platformAudit.list({ workspaceId, limit: 5 });
+
+    const softDelete = db.statements.find((s) => s.sql.startsWith("UPDATE workspaces"));
+    assert.ok(softDelete);
+    assert.match(softDelete!.sql, /SET deleted_at = \? WHERE id = \? AND deleted_at IS NULL/);
+
+    for (const statement of db.statements) {
+      assert.equal(placeholders(statement.sql), statement.params.length, `placeholder mismatch: ${statement.sql}`);
+    }
+    for (const statement of db.statementsFor("workspace_purges")) {
+      // `listDue` is the sweeper's platform-wide query: it has no tenant filter
+      // by design. Every other statement must bind the workspace id.
+      if (statement.sql.includes("scheduled_at <= ?")) continue;
+      assert.ok(statement.params.includes(workspaceId), `workspace id must be bound: ${statement.sql}`);
+      assert.ok(!statement.sql.includes(workspaceId), "workspace id must never be interpolated");
+    }
+    const due = db.statements.find((s) => s.sql.includes("scheduled_at <= ?"));
+    assert.ok(due);
+    assert.match(due!.sql, /FROM workspace_purges/);
+    assert.equal(due!.params.at(-1), 10);
+
+    const platformInsert = db.statements.find((s) => s.sql.startsWith("INSERT INTO platform_audit_events"));
+    assert.ok(platformInsert);
+    assert.ok(platformInsert!.params.includes(workspaceId));
+    assert.equal(placeholders(platformInsert!.sql), platformInsert!.params.length);
+  });
+
+  test("purge deletes every tenant table in one transaction and reports storage keys", async () => {
+    const db = new RecordingSqlConnection();
+    const key = "sha256/aa/" + "a".repeat(64);
+    db.handlers.push({ match: /SELECT storage_key FROM assets WHERE workspace_id = \?/, rows: [{ storage_key: key }] });
+    const purges = new MySqlWorkspacePurgeRepository(db);
+
+    const keys = await purges.purge(workspaceId);
+
+    assert.deepEqual(keys, [key]);
+    assert.equal(db.statements[0].kind, "transaction-start", "a purge must be atomic");
+    const deletes = db.statements.filter((s) => s.sql.startsWith("DELETE FROM"));
+    for (const table of [
+      "run_jobs",
+      "runs",
+      "pipelines",
+      "mapping_drafts",
+      "audit_events",
+      "assets",
+      "mappings",
+      "api_keys",
+    ]) {
+      const statement = deletes.find((s) => s.sql.startsWith(`DELETE FROM ${table} `));
+      assert.ok(statement, `${table} must be purged explicitly`);
+      assert.match(statement!.sql, /WHERE workspace_id = \?$/);
+      assert.deepEqual(statement!.params, [workspaceId]);
+    }
+    const workspaceDelete = deletes.find((s) => s.sql.startsWith("DELETE FROM workspaces"));
+    assert.ok(workspaceDelete);
+    assert.match(workspaceDelete!.sql, /WHERE id = \?$/);
+    assert.deepEqual(workspaceDelete!.params, [workspaceId]);
   });
 
   test("pipeline and audit statements stay scoped", async () => {

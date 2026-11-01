@@ -1,6 +1,6 @@
 # Broker-backed queue (Redis/BullMQ or similar) — planned, deliberately deferred
 
-**Status:** ⬜ not implemented · **Phase:** C/F · **UI today:** the header shows `queue: process`
+**Status:** 🟡 opt-in BullMQ driver exists (`HEALTHBRIDGE_REDIS_URL`/`REDIS_URL`); MySQL remains the default · **Phase:** C/F · **UI today:** the header shows `queue: process`
 in demo mode and `queue: durable` with MySQL; both are labelled truthfully.
 
 ## Why it matters

@@ -9,21 +9,22 @@ Status values: `supported`, `partial`, `metadata-only`, `adapter-required`, `pla
 |---|---|---|---|---|---|---|
 | CSV / TSV | `csv-adapter` | supported | structured | via mapping | structural | RFC 4180; encoding + delimiter detection; no clinical semantics inferred |
 | JSON | `json-adapter` | supported | structured | via mapping | structural | Object or array; streaming JSON not supported |
-| FHIR R4 JSON / Bundle / NDJSON | `fhir-r4-json-adapter` | partial | structured | via mapping | `adapter-required` | Structural inspection only; R5/STU3 not declared supported |
-| XLSX | — | planned | — | — | — | Phase E |
-| XML / CDA | — | planned | — | — | — | Phase E; document metadata first |
-| HL7 v2 (2.3–2.9) | — | planned | — | — | — | Phase E; ADT and ORU first |
-| DICOM metadata | — | planned | — | — | — | Phase E; metadata only, no pixel data, no transcoding |
-| DICOMweb (QIDO/WADO/STOW) | — | planned | — | — | — | Phase G |
-| FHIR REST API | — | planned | — | — | — | Phase E; client with paging + SSRF allowlist |
-| MySQL connector | — | planned | — | — | — | Phase F; read-only streaming |
-| OMOP CDM | — | planned | — | — | — | Phase F; staging subset, no full OHDSI validation claim |
-| VCF / BCF | — | planned | — | — | — | Phase F; metadata + variants, no clinical interpretation |
-| FASTA / FASTQ | — | planned | — | — | — | Phase F; metadata only |
-| PDF / clinical documents | — | planned | — | — | — | Phase F; metadata first, text extraction opt-in |
-| EDF / WFDB | — | planned | — | — | — | Phase G; metadata only |
-| CDISC / ODM | — | planned | — | — | — | Requires validated domain model first |
-| MIABIS / biobank lists | — | planned | — | — | — | Requires specification review first |
+| FHIR R4 JSON / Bundle | `fhir-r4-json-adapter` | partial | structured | via mapping | `adapter-required` | Structural inspection only; R5/STU3 not declared supported |
+| FHIR R4 NDJSON | `fhir-r4-ndjson-adapter` | partial | structured | via mapping | `adapter-required` | Split into `@healthbridge/fhir-ndjson`; per-line envelope issues, registered as the fourth built-in |
+| XLSX | `xlsx-adapter` | metadata-only | structured | no | structural | Phase E; sheets/typed cells/formula-cache carried never evaluated/merged noted/dates structural/legacy .xls refused; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| XML / CDA | `xml-cda-adapter` | metadata-only | structured | no | structural | Phase E; header/section metadata, bounded previews, no clinical interpretation or NLP; XXE/ENTITY refused; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| HL7 v2 (2.3–2.9) | `hl7v2-adapter` | metadata-only | structured | no | structural | Phase E; ADT^A01 patient-shaped, ORU^R01 diagnostic-report/observation-shaped; escapes, repetitions, Z-segments reported; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| DICOM metadata | `dicom-adapter` | metadata-only | structured | no | structural | Phase E; file-meta + tag walk (explicit/implicit LE, retired BE read-only), sequences bounded, private tags by number, 20-tag PHI redaction, pixel bytes never inlined, no transcoding; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| DICOMweb (QIDO/WADO/STOW) | `dicomweb-adapter` | metadata-only | structured | no | structural | Phase G; read-only QIDO/WADO, STOW refused, bounded paging, SSRF allowlist, pixel bytes never inlined; opt-in via `registerAdapter` (not in the built-in set) |
+| FHIR REST API | `fhir-rest-adapter` | metadata-only | structured | no | structural | Phase E; read-only GET, capability statement, bounded paging, SSRF allowlist default-deny, query redaction; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| MySQL connector | `mysql-connector` | partial | structured | no | structural | Phase F; allowlisted read-only SELECT streaming, chunked cursor, secret-ref creds, transformToFHIR true; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| OMOP CDM | `omop-adapter` | metadata-only | structured | no | structural | Phase F; person/measurement/specimen/observation/condition CSV extracts, concept_ids verbatim, no OHDSI validation claim; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| VCF | `vcf-adapter` | metadata-only | structured | no | structural | Phase F; metadata + variants, no clinical interpretation; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| FASTA / FASTQ | `fasta-fastq-adapter` | metadata-only | structured | no | structural | Phase F; counts/lengths/GC/checksums, sequences never inlined; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| PDF / clinical documents | `pdf-adapter` | metadata-only | structured | no | structural | Phase F; xref/page-count/Info-dict metadata, encrypted refused, text extraction opt-in unverified; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| EDF / WFDB | `edf-wfdb-adapter` | metadata-only | structured | no | structural | Phase G scope, landed early; fixed headers, channels, sampling, byte offsets only; waveform bytes never inlined; opt-in via `registerAdapter` (not in the built-in set, so `formats list` does not show it) |
+| CDISC / ODM | `cdisc-odm-adapter` | metadata-only | structured | no | structural | Phase G; Study/MetaDataVersion/ItemDef structural metadata, XXE refused; opt-in via `registerAdapter` (not in the built-in set) |
+| MIABIS Core 2.0 profiles | `miabis-*` validators | metadata-only | n/a (profile) | n/a | structural | Phase G; Organization/ResearchStudy/Patient/Specimen attribute checks, never values-inventing; opt-in via `validateWithDetail({ profile })`; biobank flows reuse the generic stored-trace lineage view |
 
 ## FHIR validation levels
 
@@ -32,15 +33,15 @@ Status values: `supported`, `partial`, `metadata-only`, `adapter-required`, `pla
 | 1. Source structural | yes | adapters (`parse` + `inspect`) |
 | 2. Mapping definition | yes | `MappingEngine.validate` |
 | 3. FHIR resource structure | partial | `packages/validation` — Patient, Observation, Specimen, `resourceType` |
-| 4. Profile validation | no | needs external validator adapter (Phase F) |
-| 5. Terminology validation | no | needs terminology adapters + licensed code systems (Phase F) |
-| 6. Referential integrity | no | planned with Bundle support (Phase B/F) |
+| 4. Profile validation | opt-in | executes when a `ProfileValidator` is injected (MIABIS, external FHIR validator); skipped by default |
+| 5. Terminology validation | opt-in | executes end-to-end via `TransformOptions.terminology` (operator-supplied tables; licensed systems never bundled); skipped by default |
+| 6. Referential integrity | opt-in | executes in `validateWithDetail` when sibling resources are supplied; pipeline runs report skipped by default |
 
 The CLI prints exactly which levels ran; it never implies levels 4–6 were executed.
 
 ## Mapping transforms
 
-`identity`, `uppercase`, `lowercase`, `trim`, `parse_date_iso`, `format_gender_fhir`, `concat`, `split`, `number_to_string`, `string_to_number`, `default_value`, `to_reference`, `codeable_concept` — all implemented, all covered by tests.
+`identity`, `uppercase`, `lowercase`, `trim`, `parse_date_iso`, `format_gender_fhir`, `concat`, `split`, `number_to_string`, `string_to_number`, `default_value`, `to_reference`, `codeable_concept`, `convert_units` (UCUM-subset, unknown units rejected) — all implemented, all covered by tests. Rules may chain via the `__rule.<id>` namespace and, with opt-in `allowCrossRecordContext`, read other records (`__batch.`) and prior outputs (`__output.`); without the flag the per-record path is byte-identical.
 Anything else is a hard error. No JavaScript evaluation anywhere.
 
 ## Platform (API, persistence, auth, storage)
@@ -53,13 +54,13 @@ Anything else is a hard error. No JavaScript evaluation anywhere.
 | API keys, scopes, roles | Supported | HMAC-SHA256 with server pepper; plaintext shown once |
 | Key revocation and rotation | Supported | rotation revokes the old key in the same call |
 | Rate limiting | Supported | per-key token bucket, in-process (not shared between replicas) |
-| Object storage | Partial | local filesystem + in-memory; S3-compatible driver planned |
+| Object storage | Partial | local filesystem + in-memory default; S3-compatible driver (`S3StorageDriver`, SigV4, env config) selected automatically when `HEALTHBRIDGE_S3_ENDPOINT` + bucket are set, refusing to start on half-config or unusable S3 |
 | Async runs, retries, cancellation | Supported | durable `run_jobs` queue in database mode (at-least-once, lease recovery, cross-replica cancel); in-process queue in demo mode (ADR-0004) |
 | Idempotent run submission | Supported | per-workspace `Idempotency-Key`, payload checksum compared |
 | SSE progress | Partial | stage-level progress, not per-record |
 | Audit trail | Supported | append-only, tenant scoped; write failures logged, never fatal |
-| OpenAPI document | Planned | `docs/api.md` is the contract today |
-| Redis/BullMQ shared worker | Not planned | a MySQL-backed queue covers restart safety and multi-replica claiming; revisit only if queue fan-out demands it (ADR-0004) |
+| OpenAPI document | Supported | committed at `docs/openapi.json`, diffed in CI, not served over HTTP |
+| Redis/BullMQ shared worker | Opt-in | `BullMqJobStore` selected by `HEALTHBRIDGE_REDIS_URL`/`REDIS_URL` (unreachable Redis fails fast); MySQL `run_jobs` remains the default (ADR-0004) |
 | Encryption at rest of stored resources | Planned | deployment responsibility today (see SECURITY.md) |
 | Streaming uploads | Planned | bodies are buffered up to the configured limit |
 
@@ -77,8 +78,8 @@ Anything else is a hard error. No JavaScript evaluation anywhere.
 | 1 — source structural | Supported | adapter issues, per-record `sourceLocation` |
 | 2 — mapping definition | Supported | static checks before any record is mapped |
 | 3 — target structural | Partially supported | FHIR R4 checks for Patient / Observation / Specimen and the generic `resourceType` requirement |
-| 4 — profile | Planned | requires an external validator adapter |
-| 5 — terminology | Planned | requires licensed code systems |
-| 6 — referential integrity | Planned | lands with Bundle workflows |
+| 4 — profile | Opt-in | executes when a `ProfileValidator` is injected; skipped by default |
+| 5 — terminology | Opt-in | executes via injected provider (licensed systems never bundled); skipped by default |
+| 6 — referential integrity | Opt-in | executes in `validateWithDetail` with siblings; pipeline runs report skipped by default |
 
 `result.validation.levels` reports every level as `executed` or `skipped` with a reason.

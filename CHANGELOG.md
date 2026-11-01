@@ -29,6 +29,13 @@ the real API, and the base the Studio will grow from.
 - **Testing**: 32 console unit tests (SSE parsing, error mapping, formatters, proxy contract),
   32 Playwright tests against a real API + proxy (and the same suite against Docker Compose),
   axe accessibility checks, and API regressions for oversized uploads and malformed JSON.
+- **Opt-in adapters (metadata-only unless noted)**: FHIR REST client, DICOMweb (read-only QIDO/WADO, SSRF allowlist), CDISC ODM, MySQL read-only connector (partial, `transformToFHIR: true`), OMOP CDM staging, PDF metadata, EDF/WFDB, XLSX, VCF/FASTA, HL7 v2, CDA/XML, DICOM; FHIR NDJSON split into `@healthbridge/fhir-ndjson` and registered as the fourth built-in. Adapter conformance kit gates every adapter.
+- **Engine depth**: rule-output chaining (`__rule.`), opt-in cross-record context, `convert_units` (validated UCUM subset), terminology level 5 executes end-to-end via injected provider, streaming CSV tokenization with bounded-memory pipeline batches and SDK streaming file input.
+- **Live pausable execution**: chunked checkpoints with pause/resume/cancel (`POST /runs/:id/pause`, `/resume`), resumable byte-identical runs; static replay untouched and never labelled live.
+- **Queue/storage options**: opt-in BullMQ driver and auto-selected S3 driver (fail fast when misconfigured); MySQL queue and local/memory storage remain the defaults.
+- **SDK + client**: plugin manifest/signature gating, streaming file transform, `@healthbridge/client` typed REST client, `GET /assets/:id/schema`.
+- **Validation depth**: MIABIS Core 2.0 profile validators, external FHIR validator adapter, operator-supplied local code tables (licence mandatory), validation centre + lineage + mapping-editor Studio pages.
+- **Docs site + release automation**: dependency-free static site generator with link checking; manual-dispatch release workflow (build, pack, no publish without approval).
 
 ### Fixed
 

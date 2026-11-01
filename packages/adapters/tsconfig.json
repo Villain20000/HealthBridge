@@ -11,6 +11,9 @@
     },
     {
       "path": "../core"
+    },
+    {
+      "path": "../fhir-ndjson"
     }
   ],
   "include": ["src/**/*"]

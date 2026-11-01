@@ -103,6 +103,11 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
+      - name: OpenAPI contract is current (docs/openapi.json)
+        env:
+          TSX_TSCONFIG_PATH: tsconfig.tsx.json
+        run: npx tsx apps/api/src/generate-openapi.ts --check
+
       - name: Lint
         run: npm run lint
 
@@ -193,17 +198,21 @@ jobs:
           "
 
   dependency-audit:
-    name: Dependency audit
+    name: Production dependency audit
     runs-on: ubuntu-latest
-    # Non-blocking until the known transitive advisories are remediated.
-    # TODO: drop `continue-on-error` and make this a required check once fixed.
-    continue-on-error: true
+    # Blocking: any high/critical production advisory fails unless it matches a
+    # documented, time-boxed exception in scripts/audit-prod.mjs. Make this
+    # check required in branch protection.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm audit --omit=dev --audit-level=high
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Audit production dependencies
+        run: npm run audit:prod
 
   console-e2e:
     name: Operator Console E2E (built API + console proxy)

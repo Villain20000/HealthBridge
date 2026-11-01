@@ -359,7 +359,8 @@ export type TransformFunctionKind =
   | "string_to_number"
   | "default_value"
   | "to_reference"
-  | "codeable_concept";
+  | "codeable_concept"
+  | "convert_units";
 
 /** Supported transforms, in the same order as the engine's `TRANSFORM_FUNCTIONS`. */
 export const MAPPING_TRANSFORM_KINDS: readonly TransformFunctionKind[] = [
@@ -376,6 +377,7 @@ export const MAPPING_TRANSFORM_KINDS: readonly TransformFunctionKind[] = [
   "default_value",
   "to_reference",
   "codeable_concept",
+  "convert_units",
 ];
 
 export type ConditionOperator =
@@ -409,6 +411,15 @@ export interface MappingDefinition {
   targetResourceType?: string;
   targetProfile?: string;
   description?: string;
+  /**
+   * Opt-in cross-record context. When `true`, the pipeline maps the whole
+   * batch via `MappingEngine.executeBatch()` so rules may read other records
+   * (`__batch.<index>.<path>`) and already-produced targets
+   * (`__output.<index>.<path>`) — e.g. a DiagnosticReport linking the
+   * Observation resources produced from sibling rows. When unset or `false`
+   * every record is mapped in isolation, exactly as before.
+   */
+  allowCrossRecordContext?: boolean;
   /**
    * Domains this mapping is intended for. When the detected source domain is
    * not listed, the run emits a `DOMAIN_MISMATCH` warning instead of silently
@@ -553,6 +564,52 @@ export interface RunLineage {
   declared: DeclaredLineage;
   evidence: RunLineageEvidence;
   truncated: boolean;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Live pausable execution — checkpoint/resume contracts (additive)          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Pipeline stage a {@link RunCheckpoint} was taken at.
+ *
+ * `mapping` checkpoints are taken at chunk boundaries while records are
+ * transformed; `parse` is used when a run pauses before mapping starts;
+ * `done` marks the final checkpoint of a finished run.
+ */
+export type LiveCheckpointStage = "parse" | "mapping" | "paused" | "done";
+
+/**
+ * Persisted resume cursor for a live run.
+ *
+ * Taken after every record chunk and stored on the run row, so a paused run
+ * can be observed (and, in a future replica, resumed) without trusting
+ * process memory. `recordIndex` is the next record to process; the checksums
+ * bind the checkpoint to one exact input and output prefix, so a resume that
+ * would silently diverge is rejected instead.
+ */
+export interface RunCheckpoint {
+  runId: string;
+  stage: LiveCheckpointStage;
+  /** Zero-based index of the next record to process. */
+  recordIndex: number;
+  /** Records processed when the checkpoint was taken. */
+  recordsProcessed: number;
+  /** Total records when known (after parsing), otherwise absent. */
+  recordsTotal?: number;
+  /** Checksum of the run input; a resume with different bytes is refused. */
+  inputChecksum?: string;
+  /** Checksum of the output prefix produced so far. */
+  outputChecksumSoFar?: string;
+  adapterId?: string;
+  adapterVersion?: string;
+  /**
+   * Effective provenance timestamp of the run. A resume must reuse it:
+   * replaying with a fresh timestamp would produce different provenance and
+   * break byte-identical resume.
+   */
+  importedAt: string;
+  updatedAt: string;
 }
 
 /** Flatten an object into leaf paths, bounded by depth and array length. */

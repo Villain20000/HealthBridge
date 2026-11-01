@@ -3,12 +3,21 @@ import * as path from "node:path";
 import {
   HealthBridge,
   HealthBridgeError,
+  type InputDescriptor,
   type MappingDefinition,
   ENGINE_VERSION,
   type RunBundle,
 } from "@healthbridge/sdk";
 import { exportTraceReport } from "@healthbridge/trace-protocol";
 import { parse as parseYaml } from "yaml";
+import {
+  bridgeWithCsvDelimiterOverride,
+  decodeBufferWithEncoding,
+  resolveDelimiterFlag,
+  resolveEncodingFlag,
+} from "./overrides.js";
+import { getCommandHelp } from "./help.js";
+import { renderCompletion } from "./completions.js";
 
 export const EXIT_CODES = {
   OK: 0,
@@ -94,6 +103,74 @@ function flagString(flags: ParsedArgs["flags"], name: string): string | undefine
 
 function flagBool(flags: ParsedArgs["flags"], name: string): boolean {
   return flags[name] === true || flags[name] === "true";
+}
+
+export function stdinInputDescriptor(
+  text: string,
+  filename = "stdin.csv",
+): {
+  id: string;
+  filename: string;
+  contentString: string;
+} {
+  return { id: "stdin", filename, contentString: text };
+}
+
+export async function readStdinText(
+  stream: NodeJS.ReadableStream = process.stdin as NodeJS.ReadableStream,
+  encoding?: string,
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream as AsyncIterable<Buffer | string>) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  const buffer = Buffer.concat(chunks);
+  if (encoding === undefined) return buffer.toString("utf-8");
+  return decodeBufferWithEncoding(buffer, encoding);
+}
+
+/**
+ * Build the transform/inspect input for a resolved file path. Without an
+ * encoding override the path is passed through untouched so the engine's
+ * auto-detection (BOM sniffing, windows-1252 fallback) applies; with an
+ * override the bytes are decoded here and the engine receives plain text.
+ */
+function buildFileInput(
+  filePath: string,
+  encoding: string | undefined,
+  io: CliIo,
+): string | InputDescriptor | undefined {
+  if (encoding === undefined) return filePath;
+  try {
+    return {
+      id: `file-${path.basename(filePath)}`,
+      filename: path.basename(filePath),
+      contentString: decodeBufferWithEncoding(fs.readFileSync(filePath), encoding),
+    };
+  } catch (error) {
+    io.err(`Error: ${(error as Error).message}`);
+    return undefined;
+  }
+}
+
+async function buildTransformInput(
+  inputArg: string,
+  flags: ParsedArgs["flags"],
+  encoding: string | undefined,
+  io: CliIo,
+): Promise<string | InputDescriptor | undefined> {
+  if (inputArg === "-") {
+    try {
+      const text = await readStdinText(process.stdin as NodeJS.ReadableStream, encoding);
+      return stdinInputDescriptor(text, flagString(flags, "filename") ?? "stdin.csv");
+    } catch (error) {
+      io.err(`Error: ${(error as Error).message}`);
+      return undefined;
+    }
+  }
+  const filePath = requireFile(inputArg, io, "Input file");
+  if (!filePath) return undefined;
+  return buildFileInput(filePath, encoding, io);
 }
 
 function requireFile(filePath: string | undefined, io: CliIo, label = "Input file"): string | undefined {
@@ -254,6 +331,13 @@ async function runSelfTest(bridge: HealthBridge): Promise<{ ok: boolean; details
 export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<number> {
   const { command, flags } = parseArgs(argv);
   const [primary, secondary] = command;
+  if (flagBool(flags, "help")) {
+    const topic = getCommandHelp(primary ?? "", secondary);
+    if (topic) {
+      io.out(topic);
+      return EXIT_CODES.OK;
+    }
+  }
   const bridge = new HealthBridge();
   const json = flagBool(flags, "json");
 
@@ -314,9 +398,22 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
       }
 
       case "inspect": {
+        const delimiter = resolveDelimiterFlag(flags["delimiter"]);
+        if (!delimiter.ok) {
+          io.err(delimiter.message);
+          return EXIT_CODES.INPUT_INVALID;
+        }
+        const encoding = resolveEncodingFlag(flags["encoding"]);
+        if (!encoding.ok) {
+          io.err(encoding.message);
+          return EXIT_CODES.INPUT_INVALID;
+        }
         const filePath = requireFile(command[1], io, "Input file");
         if (!filePath) return EXIT_CODES.INPUT_INVALID;
-        const inspection = await bridge.inspect(filePath, {
+        const inspectInput = buildFileInput(filePath, encoding.value, io);
+        if (!inspectInput) return EXIT_CODES.INPUT_INVALID;
+        const activeBridge = delimiter.value ? bridgeWithCsvDelimiterOverride(bridge, delimiter.value) : bridge;
+        const inspection = await activeBridge.inspect(inspectInput, {
           adapterId: flagString(flags, "adapter"),
           maxRecords: flagString(flags, "max-records") ? Number(flagString(flags, "max-records")) : undefined,
         });
@@ -346,15 +443,32 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
       }
 
       case "transform": {
-        const filePath = requireFile(command[1], io, "Input file");
-        if (!filePath) return EXIT_CODES.INPUT_INVALID;
+        const delimiter = resolveDelimiterFlag(flags["delimiter"]);
+        if (!delimiter.ok) {
+          io.err(delimiter.message);
+          return EXIT_CODES.INPUT_INVALID;
+        }
+        const encoding = resolveEncodingFlag(flags["encoding"]);
+        if (!encoding.ok) {
+          io.err(encoding.message);
+          return EXIT_CODES.INPUT_INVALID;
+        }
 
         const mappingPath = flagString(flags, "mapping");
         const mapping = mappingPath ? loadMapping(mappingPath, io) : DEFAULT_PATIENT_MAPPING;
         if (!mapping) return EXIT_CODES.USAGE;
 
-        const result = await bridge.transform({
-          input: filePath,
+        const inputArg = command[1];
+        if (!inputArg) {
+          io.err("Error: Input file path is required (use - for stdin)");
+          return EXIT_CODES.INPUT_INVALID;
+        }
+        const input = await buildTransformInput(inputArg, flags, encoding.value, io);
+        if (!input) return EXIT_CODES.INPUT_INVALID;
+
+        const activeBridge = delimiter.value ? bridgeWithCsvDelimiterOverride(bridge, delimiter.value) : bridge;
+        const result = await activeBridge.transform({
+          input,
           mapping,
           adapterId: flagString(flags, "adapter"),
           maxRecords: flagString(flags, "max-records") ? Number(flagString(flags, "max-records")) : undefined,
@@ -363,7 +477,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
 
         const bundlePath = flagString(flags, "run-bundle");
         if (bundlePath) {
-          const bundle = bridge.createRunBundle(result.runId);
+          const bundle = activeBridge.createRunBundle(result.runId);
           fs.writeFileSync(path.resolve(bundlePath), JSON.stringify(bundle, null, 2) + "\n", "utf-8");
           if (!json) io.err(`Run bundle: ${bundlePath} (input ${bundle.input.checksum ?? "unhashed"})`);
         }
@@ -613,6 +727,16 @@ export async function runCli(argv: string[], io: CliIo = defaultIo): Promise<num
         return EXIT_CODES.OK;
       }
 
+      case "completions": {
+        const script = command[1] ? renderCompletion(command[1]) : undefined;
+        if (!script) {
+          io.err(`Error: unsupported shell '${command[1] ?? "(missing)"}'. Usage: healthbridge completions <bash|zsh>`);
+          return EXIT_CODES.USAGE;
+        }
+        io.out(script);
+        return EXIT_CODES.OK;
+      }
+
       case undefined:
       case "help": {
         io.out(HELP_TEXT);
@@ -646,17 +770,25 @@ Commands:
   formats list                   List registered adapters and capabilities
   formats inspect <file>         Show detection candidates and schema
   inspect <file>                 Inspect a medical dataset
-  transform <file>               Transform a dataset (default: FHIR R4 Patient)
+  transform <file|->            Transform a dataset (default: FHIR R4 Patient; - reads stdin)
   validate <file>                Validate a FHIR R4 resource
   trace show <file>              Render a trace report
   demo generate                  Generate deterministic synthetic data
   plugins list                   List adapters (built-in + installed)
   examples list                  List bundled examples and datasets
+  completions <bash|zsh>          Print a static shell completion script
+
+Run 'healthbridge <command> --help' for per-command help
+(transform, inspect, validate, formats, doctor, trace, reproduce, demo).
 
 Common options:
   --mapping <file.json|yaml>     Mapping definition (default: built-in patient mapping)
   --adapter <id>                 Force a specific adapter
   --max-records <n>              Limit processed records
+  --delimiter <d>                Override CSV delimiter: comma, semicolon, tab, pipe
+                                 (auto-detection is the default; transform/inspect only)
+  --encoding <enc>               Override input encoding: utf-8, utf-16le, windows-1252
+                                 (auto-detection is the default; transform/inspect only)
   --out <file>                   Write output to a file
   --format json|ndjson           Output format (default: json)
   --fail-on warning              Exit non-zero on warnings

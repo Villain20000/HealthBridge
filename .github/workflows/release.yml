@@ -1,26 +1,30 @@
 name: Release
 
+# Manual dispatch ONLY: this workflow never runs on push or pull_request.
+# It builds, fully tests and packs every workspace into dist/ tarballs that
+# are uploaded as workflow artifacts. There is deliberately NO registry
+# publish step here: publishing stays "only with explicit authorisation"
+# (ROADMAP Phase F), so a release tag or a maintainer must trigger a
+# separate, explicitly authorised publish.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
+    inputs:
+      label:
+        description: "Label for the release artifacts (e.g. the version being packaged)"
+        required: false
+        default: "manual"
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-manual
   cancel-in-progress: false
 
 jobs:
-  verify:
-    name: Verify release (${{ matrix.node }})
+  package:
+    name: Build, test and pack workspaces
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [22, 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,94 +32,41 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           cache: npm
 
       - name: Install
         run: npm ci
+
+      - name: Production dependency audit
+        run: npm run audit:prod
 
       - name: Typecheck and build
         run: npm run build
 
-      - name: Unit and integration tests
+      - name: Full test suite
         run: npm test
 
-      - name: Verify publishable tarballs
+      - name: Docs site builds deterministically
+        run: |
+          npm run docs:site -- --out /tmp/docs-site-a
+          npm run docs:site -- --out /tmp/docs-site-b
+          diff -r /tmp/docs-site-a /tmp/docs-site-b
+          test -s /tmp/docs-site-a/index.html
+
+      - name: Verify publishable tarballs (packaging gate)
         run: node scripts/check-pack.mjs
 
-  publish-npm:
-    name: Publish npm packages
-    needs: verify
-    # Publishing happens only for version tags; a manual run is a dry rehearsal.
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # required for provenance
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Pack every workspace into dist/
+        run: npm run release:pack
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: List packed tarballs
+        run: ls -la dist/*.tgz
+
+      - name: Upload release tarballs
+        uses: actions/upload-artifact@v4
         with:
-          # Node 22 and 24 are both verified in the `verify` job.
-          node-version: 24
-          cache: npm
-          registry-url: https://registry.npmjs.org
-
-      - name: Install
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      # `--workspaces` skips private workspaces, so apps/api and apps/web are
-      # never published; only the public `@healthbridge/*` libraries are.
-      - name: Publish public workspace packages
-        run: npm publish --workspaces --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  publish-images:
-    name: Publish container images (GHCR)
-    needs: verify
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: healthbridge-api
-            dockerfile: docker/Dockerfile.api
-          - image: healthbridge-web
-            dockerfile: docker/Dockerfile.web
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}/${{ matrix.image }}:latest
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          name: release-tarballs-${{ inputs.label }}
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 30

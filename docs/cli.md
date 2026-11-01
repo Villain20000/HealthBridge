@@ -38,7 +38,7 @@ consistent but timestamps differ, so the output checksum changes.
 |---|---|
 | 0 | Success |
 | 1 | Usage error (unknown command, missing flag, bad standard) |
-| 2 | Invalid input (file missing, unparsable JSON) |
+| 2 | Invalid input (file missing, unparsable JSON, invalid `--delimiter`/`--encoding` value, undecodable bytes) |
 | 3 | Validation failed (`validate`, or `--fail-on warning`) |
 | 4 | Adapter error (no adapter, run failed) |
 | 5 | Internal error (environment self-test failed) |
@@ -58,7 +58,7 @@ Table (or JSON manifests) of format, version, honest status and capability flags
 ### `formats inspect <file> [--json]`
 Detection candidates with confidences plus the schema summary.
 
-### `inspect <file> [--json] [--adapter <id>] [--max-records <n>]`
+### `inspect <file> [--json] [--adapter <id>] [--max-records <n>] [--delimiter <d>] [--encoding <enc>]`
 Schema, inferred types, nullability, warnings (encoding, delimiter confidence, ragged rows, duplicate headers).
 
 ### `transform <file> [options]`
@@ -71,8 +71,10 @@ Schema, inferred types, nullability, warnings (encoding, delimiter confidence, r
 | `--format json\|ndjson` | Output serialisation (default `json`) |
 | `--json` | Print the full result envelope (coverage, issues, data loss, traces) |
 | `--fail-on warning` | Exit 3 on `completed_with_warnings` |
+| `--delimiter <d>` | Override CSV delimiter: `,` (comma), `;` (semicolon), `tab`, `\|` (pipe). Auto-detection is the default (see below) |
+| `--encoding <enc>` | Override input encoding: `utf-8`, `utf-16le`, `windows-1252`. Auto-detection is the default (see below) |
 
-Prints a one-line summary to stderr: `status=… records=x/y coverage=z% unmapped=n rejected=n run=…`.
+Use `-` instead of a file to read the dataset from stdin. Prints a one-line summary to stderr: `status=… records=x/y coverage=z% unmapped=n rejected=n run=…`.
 
 ### `validate <file> [--standard fhir-r4] [--json]`
 Structural FHIR R4 checks. Prints which levels ran. Exit 3 when invalid.
@@ -133,3 +135,54 @@ Adapters in use, and bundled examples/datasets. Third-party adapters are privile
 `transform --json` includes `traces[]` (protocol v1.2). Events carry `stage` (`detect`, `adapter-selection`, `parse`, `mapping`, `export`), `spanId`, adapter/engine versions, `recordIndex`, `sourcePath`, `ruleId`, `status`, `durationMs`, `issues[]` and `redactionState`.
 
 Snippets are redacted by default: direct identifiers (SSN, MRN, national id, phone, e-mail, address, tokens) and quasi-identifiers (names, birth dates, postal codes, city) are masked; clinical codes and quantities are preserved for debugging. Long strings and arrays are truncated. Set the SDK's `debug.payloadMode: "full"` only for local, non-persisted debugging.
+
+## Input overrides (`--delimiter`, `--encoding`)
+
+`transform` and `inspect` accept two optional input overrides. Both are validated
+strictly: any other value exits with code 2 and actionable advice. When both
+flags are omitted, auto-detection applies (delimiter sniffing; BOM sniffing with
+a windows-1252 fallback) — nothing changes for existing commands.
+
+| Flag | Accepted values | What it does |
+|---|---|---|
+| `--delimiter <d>` | `,` (`comma`), `;` (`semicolon`), `tab` (`\t`), `\|` (`pipe`) | Forces the CSV parser to split on that delimiter. `inspect` still shows the auto-detected schema and adds a `Delimiter override active` warning; `transform` parses with the forced delimiter. |
+| `--encoding <enc>` | `utf-8`, `utf-16le`, `windows-1252` | Decodes the file (or stdin) bytes with that encoding before handing text to the engine. Bytes that are invalid in the claimed encoding exit 2. |
+
+```bash
+healthbridge transform semicolon.csv --delimiter ';'
+healthbridge inspect legacy.csv --encoding windows-1252 --json
+cat utf16.csv | healthbridge transform - --encoding utf-16le --json
+```
+
+Honest-behavior notes:
+
+- The CLI never rewrites your bytes: `--encoding` only chooses how they are decoded to text.
+- Because the engine receives decoded text, the run envelope reports `encoding: utf-8` and the input checksum is computed over the decoded bytes when an override is used.
+- Override runs keep the standard adapter id. `reproduce` does not carry overrides: to reproduce an override run byte-identically, re-run `transform` with the same flags.
+
+## Shell completions
+
+```bash
+healthbridge completions bash   # append to ~/.bash_completion
+healthbridge completions zsh    # save as _healthbridge, then compinit
+```
+
+The scripts embed static command/flag lists (including `--delimiter`/`--encoding`
+values) and never execute the CLI at completion time. Any other shell exits 1
+with usage advice.
+
+## Per-command help
+
+Every workflow command prints its own help page, including options, exit codes
+and an example:
+
+```bash
+healthbridge transform --help
+healthbridge inspect --help
+healthbridge validate --help
+healthbridge formats --help
+healthbridge doctor --help
+healthbridge trace --help
+healthbridge reproduce --help
+healthbridge demo --help
+```

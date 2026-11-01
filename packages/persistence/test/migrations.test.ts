@@ -200,6 +200,26 @@ describe("schema (DDL) invariants", () => {
     }
   });
 
+  test("migration 5 schedules purges and keeps a platform audit that outlives tenants", () => {
+    const migration = MIGRATIONS.find((entry) => entry.version === 5);
+    assert.ok(migration, "migration 5 must exist");
+    assert.equal(migration!.name, "workspace_purges");
+
+    const ddl = migration!.statements.join("\n");
+    assert.match(ddl, /CREATE TABLE IF NOT EXISTS workspace_purges/);
+    assert.match(ddl, /PRIMARY KEY \(workspace_id\)/);
+    assert.match(ddl, /KEY idx_workspace_purges_due \(scheduled_at, workspace_id\)/);
+    assert.match(
+      ddl,
+      /fk_workspace_purges_workspace FOREIGN KEY \(workspace_id\)\s+REFERENCES workspaces \(id\) ON DELETE CASCADE/,
+    );
+
+    const platform = migration!.statements.find((sql) => sql.includes("CREATE TABLE IF NOT EXISTS platform_audit_events"));
+    assert.ok(platform, "platform_audit_events must be created");
+    assert.match(platform!, /KEY idx_platform_audit_created \(created_at, id\)/);
+    assert.doesNotMatch(platform!, /REFERENCES/, "platform audit must survive the workspace it describes");
+  });
+
   test("mapping drafts are keyed per workspace and name without a mapping foreign key", () => {
     const migration = MIGRATIONS.find((entry) => entry.version === 4);
     assert.ok(migration, "migration 4 must exist");

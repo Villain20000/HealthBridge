@@ -21,6 +21,21 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Opt-in queue driver (ADR-0004 default stays MySQL): point
+  # HEALTHBRIDGE_REDIS_URL at this service to route the run queue through
+  # Redis/BullMQ instead of the `run_jobs` table.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   api:
     build:
       context: ..
@@ -42,6 +57,9 @@ services:
       HEALTHBRIDGE_BOOTSTRAP_TOKEN: ${HEALTHBRIDGE_BOOTSTRAP_TOKEN:-demo-bootstrap-token}
       HEALTHBRIDGE_STORAGE_DIR: /data/objects
       HEALTHBRIDGE_CORS_ORIGINS: http://localhost:4200
+      # Opt-in BullMQ queue driver; empty keeps the MySQL default. Set to
+      # redis://redis:6379 to route the run queue through Redis/BullMQ.
+      HEALTHBRIDGE_REDIS_URL: ${HEALTHBRIDGE_REDIS_URL:-}
     volumes:
       - object-data:/data/objects
     restart: unless-stopped
@@ -68,3 +86,4 @@ services:
 volumes:
   mysql-data:
   object-data:
+  redis-data:

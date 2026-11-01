@@ -85,16 +85,16 @@ pipeline regression testing, and as a foundation for a visual transformation deb
 |---|---|---|
 | CSV / TSV adapter (RFC 4180) | **Supported** | Quoted and multiline cells, CRLF, BOM, UTF-16, Windows-1252 fallback, `, ; \t \|` delimiter detection, ragged-row and duplicate-header reporting |
 | JSON adapter | **Supported** | Object or array of objects; no streaming JSON parser |
-| FHIR R4 JSON adapter | **Partial** | Single resource, `Bundle`, NDJSON; structural inspection only — no profile or terminology validation |
+| FHIR R4 JSON adapter | **Partial** | Single resource and `Bundle` (NDJSON lives in `@healthbridge/fhir-ndjson`); structural inspection only — no profile or terminology validation |
 | Canonical Medical Data Envelope | **Supported** | SHA-256 checksum, physical source location, encoding, domain classification, parse issues, unmapped fields |
-| Declarative mapping engine | **Supported** | 13 deterministic transforms, conditional rules, array-aware target paths, coverage and rejection reporting, static mapping validation |
+| Declarative mapping engine | **Supported** | 14 deterministic transforms (incl. `convert_units` on a validated UCUM subset), conditional rules, rule-output chaining (`__rule.`), opt-in cross-record context (`allowCrossRecordContext`), array-aware target paths, coverage and rejection reporting, static mapping validation |
 | Trace protocol v1.2 | **Supported** | Staged events, span ids, protocol version, structural redaction by default |
 | CLI (`@healthbridge/cli`) | **Supported** | `doctor`, `init`, `formats`, `inspect`, `transform`, `validate`, `trace`, `reproduce`, `demo`, `plugins`, `examples` |
 | TypeScript SDK (`@healthbridge/sdk`) | **Supported** | File or inline input, inspect, detect, transform, replay, trace export, run bundle verification |
 | FHIR validation | **Partial** | Structural checks for Patient, Observation, Specimen and the generic `resourceType` requirement; profile, terminology and referential levels are **not** executed and the CLI says so |
-| NestJS REST API (`@healthbridge/api`) | **Partial** | MySQL or in-memory persistence, HMAC API keys with scopes and roles, tenant isolation, async runs with idempotency, SSE progress, traces/bundles/replay, audit trail. The queue is the durable `run_jobs` table in database mode and in-process only in demo mode (no broker); no OpenAPI document is served yet — see [docs/api.md](docs/api.md) |
-| Operator Console (`apps/web`) | **Supported (v1)** | Angular 19, standalone components + signals: connect, health, dashboard, runs (cursor pagination, submit, cancel, replay), run detail with issues/resources/traces/bundle, live SSE progress, asset upload, mappings, pipelines (create + run), API keys, audit log, dark/light themes. API key kept in memory only. The full Studio (visual debugger, mapping editor, schema/lineage explorers) is **planned** — see [docs/console.md](docs/console.md) and [docs/plan-web-studio.md](docs/plan-web-studio.md) |
-| HL7 v2, CDA/XML, DICOM, XLSX, VCF, OMOP, MySQL connector | **Planned** | See [ROADMAP.md](ROADMAP.md) and [docs/capability-matrix.md](docs/capability-matrix.md) |
+| NestJS REST API (`@healthbridge/api`) | **Partial** | MySQL or in-memory persistence, HMAC API keys with scopes and roles, tenant isolation, async runs with idempotency, SSE progress, traces/bundles/replay, audit trail. The queue is the durable `run_jobs` table in database mode and in-process only in demo mode (no broker); OpenAPI committed at `docs/openapi.json` and diffed in CI (not served over HTTP) — see [docs/api.md](docs/api.md) |
+| Operator Console (`apps/web`) | **Supported (v1)** | Angular 19, standalone components + signals: connect, health, dashboard, runs (cursor pagination, submit, cancel, replay), run detail with issues/resources/traces/bundle, live SSE progress, asset upload, mappings, pipelines (create + run), API keys, audit log, dark/light themes. API key kept in memory only. Studio slices shipped: mapping rule-table editor (keyboard-complete, client-side static validation, version history), read-only schema explorers, lineage graph view and validation centre; the VS Code-style three-pane debugger extensions remain planned — see [docs/console.md](docs/console.md) and [docs/plan-web-studio.md](docs/plan-web-studio.md) |
+| MySQL connector | **Partial (opt-in)** | Read-only allowlisted SELECT with chunked streaming via `mysql-connector` (`transformToFHIR: true`); not in the built-in set. All other adapters (HL7 v2, CDA/XML, VCF, FASTA/FASTQ, XLSX, DICOM, FHIR REST, OMOP, PDF, EDF/WFDB) are opt-in `metadata-only` — see [ROADMAP.md](ROADMAP.md) and [docs/capability-matrix.md](docs/capability-matrix.md) |
 
 The CLI and the console read the same adapter manifests, so the status they print matches the
 table above and the tests behind it.
@@ -153,8 +153,8 @@ built with TypeScript project references and are installable independently (not 
 | `@healthbridge/shared-types` | Public contracts: envelope, capabilities, issues, traces, coverage, data loss |
 | `@healthbridge/trace-protocol` | Trace collector, redaction policy, report export |
 | `@healthbridge/core` | Adapter registry, checksum, sensitivity policy, path utilities |
-| `@healthbridge/adapters` | CSV, JSON and FHIR R4 JSON/NDJSON adapters |
-| `@healthbridge/mapping-engine` | Declarative rules, 13 deterministic transforms, coverage, static validation |
+| `@healthbridge/adapters` | CSV, JSON and FHIR R4 JSON adapters (plus 13 opt-in adapters; NDJSON in `@healthbridge/fhir-ndjson`) |
+| `@healthbridge/mapping-engine` | Declarative rules, 14 deterministic transforms, chaining, opt-in cross-record context, coverage, static validation |
 | `@healthbridge/transformation-engine` | Pipeline: detect → parse → map → report |
 | `@healthbridge/fhir-r4` | FHIR R4 resource interfaces |
 | `@healthbridge/validation` | Structural FHIR validation and `OperationOutcome` output |
@@ -383,7 +383,7 @@ resource type and a list of rules:
 
 ### Transforms
 
-All 13 transforms are deterministic and covered by tests. Unknown transform kinds are a hard
+All 14 transforms are deterministic and covered by tests. Unknown transform kinds are a hard
 error; there is no JavaScript evaluation anywhere.
 
 | Transform | Behaviour |
@@ -400,6 +400,7 @@ error; there is no JavaScript evaluation anywhere.
 | `default_value` | Use `rule.defaultValue` when the source value is missing |
 | `to_reference` | Build a FHIR `Reference` (`<type>/<id>`, default type `Patient`); empty ids are rejected |
 | `codeable_concept` | Build a `CodeableConcept` from `params.system` plus optional `displayPath` / `textPath`; a system is mandatory |
+| `convert_units` | Convert between units of the same dimension on a validated UCUM subset (`params.from`/`params.to`, `mcg` alias supported); unknown units and cross-dimension conversions are hard errors |
 
 ### Conditions and paths
 
@@ -784,7 +785,7 @@ apps/api                     NestJS REST API (runs, assets, mappings, keys, audi
 apps/web                     Angular Operator Console + static/API proxy server
 packages/shared-types        Public contracts, envelope, trace and data-loss types
 packages/core                Adapter registry, checksum, classification, path utilities
-packages/adapters            CSV, JSON, FHIR R4 JSON/NDJSON adapters
+packages/adapters            CSV, JSON, FHIR R4 JSON adapters (+13 opt-in; NDJSON in packages/fhir-ndjson)
 packages/mapping-engine      Declarative rules, deterministic transforms, coverage
 packages/transformation-engine  Pipeline: detect → parse → map → report
 packages/trace-protocol      Trace collector, redaction policy, report export
@@ -830,14 +831,14 @@ scripts                      Test runner, packaging gate, smoke scripts
 
 This is a developer preview. The API may change before 1.0.
 
-- **Adapters.** Only CSV/TSV, JSON and FHIR R4 JSON/Bundle/NDJSON are implemented. HL7 v2,
-  CDA/XML, DICOM, XLSX, VCF, OMOP and a MySQL source connector are planned, not present.
+- **Adapters.** CSV/TSV, JSON, FHIR R4 JSON/Bundle and FHIR NDJSON are built in. HL7 v2,
+  CDA/XML, DICOM, XLSX, VCF, FASTA/FASTQ, FHIR REST, OMOP, PDF, EDF/WFDB and a read-only MySQL source connector exist as opt-in adapters (`registerAdapter`; metadata-only except MySQL, which is partial). No adapter interprets clinical content.
 - **FHIR validation.** Structural checks only. Profile, terminology and referential-integrity
   validation are not executed; the CLI reports exactly which levels ran.
 - **Uploads.** Request bodies are buffered up to the configured limit; there is no streaming
   upload or streaming CSV parse.
-- **API contract.** No OpenAPI document is served; `docs/api.md` is the contract.
-- **Storage.** Local filesystem or memory only; there is no S3-compatible driver yet.
+- **API contract.** `docs/openapi.json` is committed and diffed in CI; it is not served over HTTP — `docs/api.md` remains the human-readable contract.
+- **Storage.** Local filesystem or memory by default; an S3-compatible driver exists (`S3StorageDriver`, env config) but is not yet wired into `app.context`.
 - **Retention and deletion.** Workspaces store a `retentionDays` value, but no retention job or
   deletion endpoints exist. Remove data at the database/object-store layer.
 - **Multi-tenancy in the console.** One workspace per session; switching workspaces means
@@ -905,10 +906,10 @@ Never post real patient data, credentials or production traces publicly.
 | A — Honest foundation | Delivered (v3.1.0) | Contracts, adapters, deterministic engine, CLI |
 | B — Credible vertical slice | Delivered (v3.2.0) | Mapping depth, trace protocol, validation, scenarios |
 | C — Persistence and API | Delivered (unreleased) | MySQL, tenant isolation, queue, SSE, audit, object storage |
-| D — Studio and debugger | In progress | Operator Console v1 shipped; visual debugger, mapping editor, schema/lineage explorers |
-| E — Adapter wave 1 | Planned | XLSX, CDA/XML metadata, HL7 v2 ADT/ORU, FHIR REST client, DICOM metadata |
-| F — Domain depth and hardening | Planned | MySQL/OMOP/VCF/FASTA/PDF adapters, terminology and external profile validation, security suite, benchmarks, docs site |
-| G — Later | Planned | DICOMweb, EDF/WFDB, CDISC/ODM, biobank lineage, public-health plugins, live pausable execution |
+| D — Studio and debugger | In progress | Operator Console v1 shipped; rule-table mapping editor, schema explorers, lineage view, validation centre shipped; debugger extensions remain |
+| E — Adapter wave 1 | Delivered (opt-in) | XLSX, CDA/XML metadata, HL7 v2 ADT/ORU, FHIR REST client, DICOM metadata landed; FHIR NDJSON split into `@healthbridge/fhir-ndjson` and registered as the fourth built-in |
+| F — Domain depth and hardening | Mostly delivered | MySQL/OMOP/VCF/FASTA/PDF adapters, UCUM `convert_units`, terminology level-5 wiring, local code-table provider, security suite, benchmarks, external FHIR validator, docs site, release automation landed; licensed-server terminology integration (LOINC/SNOMED/ICD/RxNorm/ATC) remains |
+| G — Later | Mostly delivered | EDF/WFDB, MIABIS validators, CDISC/ODM, DICOMweb, live pausable execution (chunked checkpoints, pause/resume; v1 process-local) landed; public-health jurisdiction plugins remain |
 
 Details, exit criteria and explicit non-goals: [ROADMAP.md](ROADMAP.md).
 

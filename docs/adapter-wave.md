@@ -1,6 +1,6 @@
-# Adapter wave (HL7 v2, CDA, XLSX, DICOM, FHIR REST, OMOP, VCF) — planned
+# Adapter wave (HL7 v2, CDA, XLSX, DICOM, FHIR REST, OMOP, VCF) — shipped
 
-**Status:** ⬜ not implemented · **Phase:** E/F · **UI today:** `/formats` lists what is actually
+**Status:** ✅ landed as opt-in adapters (built-ins: CSV/JSON/FHIR-JSON/NDJSON) · **Phase:** E/F · **UI today:** `/formats` lists what is actually
 supported; the console shows the API response verbatim, including limitations.
 
 ## What exists today (verified)

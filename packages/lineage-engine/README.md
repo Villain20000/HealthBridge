@@ -2,7 +2,7 @@
 
 Data provenance and field-level lineage graph builder for HealthBridge OS, built from mapping rules and transformation traces.
 
-**Status:** Delivered as a library in v3.1.0. A visual lineage view in the Operator Console is planned, not shipped.
+**Status:** Delivered as a library in v3.1.0. A read-only lineage view ships in the Operator Console (`lineage/:runId`); declared per-rule lineage stays planned.
 
 ## Install
 

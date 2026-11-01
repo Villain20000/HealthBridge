@@ -440,6 +440,22 @@ const PARAM_FIELDS: Record<TransformFunctionKind, readonly ParamField[]> = {
       help: "Fall back to the display text or code when no text path is set.",
     },
   ],
+  convert_units: [
+    {
+      key: "from",
+      label: "From unit",
+      kind: "string",
+      required: true,
+      help: "Source UCUM unit, for example mg/dL. Alias: fromUnit.",
+    },
+    {
+      key: "to",
+      label: "To unit",
+      kind: "string",
+      required: true,
+      help: "Target UCUM unit, for example g/L. Alias: toUnit.",
+    },
+  ],
 };
 
 /** Parameters the engine reads for a transform. Unknown transforms have none. */

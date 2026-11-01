@@ -26,6 +26,9 @@
       "path": "./packages/fhir-r4"
     },
     {
+      "path": "./packages/fhir-ndjson"
+    },
+    {
       "path": "./packages/validation"
     },
     {
@@ -45,6 +48,9 @@
     },
     {
       "path": "./packages/cli"
+    },
+    {
+      "path": "./packages/client"
     },
     {
       "path": "./apps/api"

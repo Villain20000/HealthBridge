@@ -296,6 +296,211 @@ describe(
       assert.ok(page.items.some((event) => event.id === "evt_mysql_1"));
     });
 
+    describe("deletion and retention (live server)", () => {
+      it("should delete a run with its traces, job and idempotency key in one call", async () => {
+        const record = run({
+          id: `run_del_${Date.now().toString(36)}`,
+          status: "completed",
+          finishedAt: "2026-01-02T00:00:00.000Z",
+        });
+        await repos.runs.create(record);
+        await repos.runs.appendTraces(workspaceId, record.id, [
+          {
+            seq: 0,
+            stage: "read",
+            stepName: "Read CSV",
+            status: "ok",
+            payload: { rows: 1 },
+            createdAt: now().toISOString(),
+          },
+        ]);
+        const store = new MySqlJobStore(connection);
+        await store.enqueue({ runId: record.id, workspaceId });
+        await repos.idempotency.save({
+          workspaceId,
+          key: `del-key-${record.id}`,
+          requestChecksum: `sha256:${"9".repeat(64)}`,
+          resourceType: "run",
+          resourceId: record.id,
+          createdAt: now().toISOString(),
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        });
+
+        assert.equal(await repos.runs.delete(otherWorkspaceId, record.id), false, "tenant isolation on delete");
+        assert.ok(await repos.runs.findById(workspaceId, record.id), "a foreign delete must not remove the row");
+
+        assert.equal(await repos.runs.delete(workspaceId, record.id), true);
+        assert.equal(await repos.runs.findById(workspaceId, record.id), undefined);
+        assert.deepEqual(await repos.runs.listTraces(workspaceId, record.id), [], "traces cascade with the run");
+        assert.equal(await store.get(record.id), undefined, "the queued job cascades with the run");
+        assert.equal(await repos.idempotency.deleteByResource(workspaceId, "run", record.id), 1);
+        assert.equal(await repos.idempotency.get(workspaceId, `del-key-${record.id}`), undefined);
+      });
+
+      it("should list only terminal runs older than the retention cutoff", async () => {
+        const oldDone = run({
+          id: `run_old_${Date.now().toString(36)}`,
+          status: "completed",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          finishedAt: "2026-01-01T01:00:00.000Z",
+        });
+        const oldRunning = run({
+          id: `run_live_${Date.now().toString(36)}`,
+          status: "running",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        });
+        const newDone = run({
+          id: `run_new_${Date.now().toString(36)}`,
+          status: "completed",
+          createdAt: "2026-06-01T00:00:00.000Z",
+          finishedAt: "2026-06-01T01:00:00.000Z",
+        });
+        for (const record of [oldDone, oldRunning, newDone]) await repos.runs.create(record);
+
+        const expired = await repos.runs.listExpired(workspaceId, "2026-03-01T00:00:00.000Z", 500);
+        const ids = expired.map((entry) => entry.id);
+
+        assert.ok(ids.includes(oldDone.id));
+        assert.equal(ids.includes(oldRunning.id), false, "a live run is never expired");
+        assert.equal(ids.includes(newDone.id), false, "inside the window");
+      });
+
+      it("should keep a shared storage key alive until the last workspace row is gone", async () => {
+        const key = `sha256/${"7".repeat(2)}/${"7".repeat(64)}`;
+        const mine = {
+          id: `as_shared_${Date.now().toString(36)}`,
+          workspaceId,
+          storageKey: key,
+          checksum: key,
+          filename: "shared.csv",
+          contentType: "text/csv",
+          sizeBytes: 12,
+          domain: "clinical",
+          sourceFormat: "csv",
+          createdAt: now().toISOString(),
+        };
+        const theirs = { ...mine, id: `${mine.id}_other`, workspaceId: otherWorkspaceId };
+        await repos.assets.create(mine);
+        await repos.assets.create(theirs);
+
+        assert.equal(await repos.assets.storageKeyInUse(key), true);
+        await repos.assets.delete(workspaceId, mine.id);
+        assert.equal(await repos.assets.storageKeyInUse(key), true, "the other tenant still references the object");
+        await repos.assets.delete(otherWorkspaceId, theirs.id);
+        assert.equal(await repos.assets.storageKeyInUse(key), false);
+      });
+
+      it("should purge a scheduled workspace and keep its platform audit", async () => {
+        const stamp = Date.now().toString(36);
+        const purgeWs = `ws_purge_${stamp}`;
+        const runId = `run_purge_${stamp}`;
+        const assetId = `as_purge_${stamp}`;
+        const mappingId = `mp_purge_${stamp}`;
+        const keyId = `key_purge_${stamp}`;
+        const storageKey = `sha256/${"8".repeat(2)}/${"8".repeat(64)}`;
+
+        await repos.workspaces.create({
+          id: purgeWs,
+          slug: `purge-${stamp}`,
+          name: "Purge Fixture",
+          plan: "community",
+          retentionDays: 30,
+          createdAt: now().toISOString(),
+        });
+        await repos.apiKeys.save({
+          id: keyId,
+          workspaceId: purgeWs,
+          name: "owner",
+          role: "owner",
+          scopes: [],
+          prefix: `hb_${stamp}`,
+          secretHash: "0".repeat(64),
+          createdAt: now().toISOString(),
+        });
+        await repos.mappings.create({
+          id: mappingId,
+          workspaceId: purgeWs,
+          name: `purge-${stamp}`,
+          spec: { rules: [] },
+          specChecksum: `sha256:${"5".repeat(64)}`,
+          sourceFormat: "csv",
+          targetFormat: "fhir-r4",
+          createdAt: now().toISOString(),
+        });
+        await repos.assets.create({
+          id: assetId,
+          workspaceId: purgeWs,
+          storageKey,
+          checksum: storageKey,
+          filename: "purge.csv",
+          contentType: "text/csv",
+          sizeBytes: 5,
+          domain: "clinical",
+          sourceFormat: "csv",
+          createdAt: now().toISOString(),
+        });
+        await repos.runs.create(
+          run({
+            id: runId,
+            workspaceId: purgeWs,
+            mappingId,
+            assetId,
+            status: "completed",
+            finishedAt: now().toISOString(),
+          }),
+        );
+        await repos.idempotency.save({
+          workspaceId: purgeWs,
+          key: `purge-key-${stamp}`,
+          requestChecksum: `sha256:${"4".repeat(64)}`,
+          resourceType: "run",
+          resourceId: runId,
+          createdAt: now().toISOString(),
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        });
+        await repos.audit.append({
+          id: `evt_purge_${stamp}`,
+          workspaceId: purgeWs,
+          action: "workspace.deletion_requested",
+          outcome: "success",
+        });
+        await repos.workspacePurges.schedule({
+          workspaceId: purgeWs,
+          workspaceSlug: `purge-${stamp}`,
+          scheduledAt: "2026-01-01T00:00:00.000Z",
+          requestedAt: "2025-12-25T00:00:00.000Z",
+        });
+
+        const due = await repos.workspacePurges.listDue(now().toISOString());
+        assert.ok(
+          due.some((entry) => entry.workspaceId === purgeWs),
+          "an elapsed grace period makes it due",
+        );
+
+        const keys = await repos.workspacePurges.purge(purgeWs);
+        assert.deepEqual(keys, [storageKey]);
+        assert.equal(await repos.workspaces.findById(purgeWs), undefined);
+        assert.equal(await repos.workspacePurges.find(purgeWs), undefined);
+        assert.equal(await repos.runs.findById(purgeWs, runId), undefined);
+        assert.equal(await repos.assets.findById(purgeWs, assetId), undefined);
+        assert.equal(await repos.apiKeys.findById(keyId), undefined);
+
+        await repos.platformAudit.append({
+          id: `pae_${stamp}`,
+          workspaceId: purgeWs,
+          workspaceSlug: `purge-${stamp}`,
+          action: "workspace.purged",
+          targetType: "workspace",
+          targetId: purgeWs,
+          outcome: "success",
+          createdAt: now().toISOString(),
+        });
+        const platform = await repos.platformAudit.list({ workspaceId: purgeWs });
+        assert.equal(platform.items.length, 1, "the platform trail outlives the workspace it describes");
+        assert.equal(platform.items[0].action, "workspace.purged");
+      });
+    });
+
     describe("run_jobs (durable queue)", () => {
       const jobStore = () => new MySqlJobStore(connection);
 

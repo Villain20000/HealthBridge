@@ -317,6 +317,320 @@ export interface CsvRecord {
   issues: Array<{ code: string; message: string; severity: "warning" | "error" }>;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Chunked (streaming) CSV tokenization                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Bounded-memory CSV tokenization. Feed decoded text chunks with `push`;
+ * each call returns the rows that completed inside the chunk. `finish`
+ * flushes the trailing row and reports an unterminated quote, mirroring
+ * `tokenizeCsv` exactly (same rows, same 1-based line numbers) no matter
+ * where chunk boundaries fall — including inside quoted cells, `""`
+ * escapes and split CRLF sequences.
+ */
+export interface ChunkedCsvTokenizer {
+  push(chunk: string): CsvRow[];
+  finish(): { rows: CsvRow[]; unterminatedQuote: boolean };
+}
+
+export function createChunkedCsvTokenizer(delimiter: string, startLine = 1): ChunkedCsvTokenizer {
+  let cells: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  let lineNumber = startLine;
+  let rowStartLine = startLine;
+  /** Previous chunk ended with `\r` outside quotes: the `\n` may still follow. */
+  let pendingCarriageReturn = false;
+  /** Previous chunk ended with `"` inside quotes: escape or close is undecided. */
+  let pendingQuote = false;
+
+  let rows: CsvRow[] = [];
+
+  return {
+    push(chunk: string): CsvRow[] {
+      rows = [];
+      let index = 0;
+
+      if (pendingQuote) {
+        pendingQuote = false;
+        if (chunk[0] === '"') {
+          cell += '"';
+          index = 1;
+        } else {
+          inQuotes = false;
+        }
+      } else if (pendingCarriageReturn) {
+        pendingCarriageReturn = false;
+        if (chunk[0] === "\n") index = 1;
+        lineNumber++;
+        pushRowShim();
+      }
+
+      for (; index < chunk.length; index++) {
+        const ch = chunk[index];
+
+        if (inQuotes) {
+          if (ch === '"') {
+            if (index + 1 < chunk.length) {
+              if (chunk[index + 1] === '"') {
+                cell += '"';
+                index++;
+              } else {
+                inQuotes = false;
+              }
+            } else {
+              // Chunk ends right after the quote: wait for the next chunk to
+              // decide between an escaped quote and a closing quote.
+              pendingQuote = true;
+            }
+            continue;
+          }
+          if (ch === "\n") lineNumber++;
+          cell += ch;
+          continue;
+        }
+
+        if (ch === '"' && cell === "") {
+          inQuotes = true;
+          continue;
+        }
+
+        if (ch === delimiter) {
+          cells.push(cell);
+          cell = "";
+          continue;
+        }
+
+        if (ch === "\r") {
+          if (index + 1 < chunk.length) {
+            if (chunk[index + 1] === "\n") index++;
+            lineNumber++;
+            pushRowShim();
+          } else {
+            // Chunk ends with `\r`: the `\n` of a CRLF may still follow.
+            pendingCarriageReturn = true;
+          }
+          continue;
+        }
+
+        if (ch === "\n") {
+          lineNumber++;
+          pushRowShim();
+          continue;
+        }
+
+        cell += ch;
+      }
+
+      const completed = rows;
+      rows = [];
+      return completed;
+    },
+
+    finish(): { rows: CsvRow[]; unterminatedQuote: boolean } {
+      rows = [];
+      if (pendingQuote) {
+        // A trailing `"` closes the quoted cell, as in `tokenizeCsv`.
+        pendingQuote = false;
+        inQuotes = false;
+      }
+      if (pendingCarriageReturn) {
+        pendingCarriageReturn = false;
+        lineNumber++;
+        pushRowShim();
+      }
+      const unterminatedQuote = inQuotes;
+      if (cell !== "" || cells.length > 0) {
+        cells.push(cell);
+        cell = "";
+        const isEmpty = cells.length === 1 && cells[0].trim() === "";
+        if (!isEmpty) rows.push({ cells, lineNumber: rowStartLine });
+        cells = [];
+      }
+      const trailing = rows;
+      rows = [];
+      cells = [];
+      cell = "";
+      return { rows: trailing, unterminatedQuote };
+    },
+  };
+
+  function pushRowShim(): void {
+    cells.push(cell);
+    cell = "";
+    const isEmpty = cells.length === 1 && cells[0].trim() === "";
+    if (!isEmpty) rows.push({ cells, lineNumber: rowStartLine });
+    cells = [];
+    rowStartLine = lineNumber;
+    pendingCarriageReturn = false;
+  }
+}
+
+export interface CsvRecordBatch {
+  /** Zero-based batch sequence number. */
+  batchIndex: number;
+  /** Normalised header row shared by every batch of the stream. */
+  headers: string[];
+  /** Delimiter used for the stream (explicit option or sniffed). */
+  delimiter: string;
+  /** Records in this batch, with line numbers and ragged-row issues. */
+  records: CsvRecord[];
+}
+
+export interface CsvStreamOptions {
+  /** Explicit delimiter; otherwise sniffed from the first buffered text. */
+  delimiter?: string;
+  /** Characters buffered for delimiter sniffing before tokenizing. Defaults to 32768. */
+  sniffSampleChars?: number;
+  /** Records per yielded batch. Defaults to 500. */
+  batchSize?: number;
+  /** Stop after this many records (mirrors `ParseContext.maxRecords`). */
+  maxRecords?: number;
+  /**
+   * Structural warnings (header problems, low sniff confidence, unterminated
+   * quote). Mirrors the warnings `readCsvTable` reports for buffered input.
+   */
+  onIssue?: (issue: { code: string; message: string; severity: "warning" | "error" }) => void;
+}
+
+/**
+ * Stream decoded CSV text into record batches with bounded memory: only the
+ * sniff sample, one in-flight row and the current batch are ever retained.
+ * Header handling, delimiter sniffing, ragged-row reporting and line numbers
+ * match `readCsvTable` + `buildCsvRecords`, so streamed and buffered parses
+ * of the same input produce identical records.
+ */
+export async function* streamCsvRecordBatches(
+  textChunks: AsyncIterable<string>,
+  options: CsvStreamOptions = {},
+): AsyncGenerator<CsvRecordBatch> {
+  const batchSize = options.batchSize !== undefined && options.batchSize > 0 ? Math.floor(options.batchSize) : 500;
+  const sampleChars =
+    options.sniffSampleChars !== undefined && options.sniffSampleChars > 0 ? options.sniffSampleChars : 32768;
+
+  // Buffer until the sniff sample is full; short inputs just buffer entirely.
+  // Everything consumed here lives in `buffered` — remaining text is pulled
+  // lazily via `take`, so at most the sample plus one chunk is ever retained.
+  let buffered = "";
+  const source: AsyncGenerator<string> = (async function* () {
+    yield* textChunks;
+  })();
+  const iterator = source[Symbol.asyncIterator]();
+  let exhausted = false;
+  const take = async (): Promise<string | undefined> => {
+    if (exhausted) return undefined;
+    const next = await iterator.next();
+    if (next.done) {
+      exhausted = true;
+      return undefined;
+    }
+    return next.value;
+  };
+
+  let chunk = await take();
+  while (chunk !== undefined && buffered.length < sampleChars) {
+    buffered += chunk;
+    chunk = buffered.length >= sampleChars ? undefined : await take();
+  }
+
+  const sniffed = sniffDelimiter(buffered);
+  const delimiter = options.delimiter ?? sniffed.delimiter;
+  if (!options.delimiter && sniffed.confidence > 0 && sniffed.confidence < 0.6) {
+    options.onIssue?.({
+      code: "CSV_STRUCTURE_WARNING",
+      severity: "warning",
+      message: `Delimiter detection confidence is low (${sniffed.confidence}); assuming '${delimiter}'. Use --delimiter to override.`,
+    });
+  }
+
+  const tokenizer = createChunkedCsvTokenizer(delimiter);
+  let headers: string[] | undefined;
+  let batch: CsvRecord[] = [];
+  let batchIndex = 0;
+  let emitted = 0;
+
+  const convert = (rows: CsvRow[]): CsvRecord[] => {
+    if (!headers) return [];
+    const table: CsvTable = {
+      headers,
+      warnings: [],
+      rows,
+      delimiter,
+      encoding: "utf-8",
+      unterminatedQuote: false,
+      duplicateHeaders: [],
+    };
+    return buildCsvRecords(table).records;
+  };
+
+  const flushBatch = function* (): Generator<CsvRecordBatch> {
+    if (batch.length === 0 || !headers) return;
+    yield { batchIndex: batchIndex++, headers, delimiter, records: batch };
+    batch = [];
+  };
+
+  const feedRows = function* (rows: CsvRow[]): Generator<CsvRecordBatch> {
+    if (rows.length === 0) return;
+    if (!headers) {
+      const headerRow = rows[0];
+      const normalised = normaliseHeaders(headerRow.cells);
+      for (const warning of normalised.warnings) {
+        options.onIssue?.({ code: "CSV_STRUCTURE_WARNING", severity: "warning", message: warning });
+      }
+      headers = normalised.headers;
+      rows = rows.slice(1);
+    }
+    for (const record of convert(rows)) {
+      if (options.maxRecords !== undefined && emitted >= options.maxRecords) return;
+      batch.push(record);
+      emitted++;
+      if (batch.length >= batchSize) yield* flushBatch();
+      if (options.maxRecords !== undefined && emitted >= options.maxRecords) return;
+    }
+  };
+
+  const feedText = function* (text: string): Generator<CsvRecordBatch> {
+    if (options.maxRecords !== undefined && emitted >= options.maxRecords) return;
+    yield* feedRows(tokenizer.push(text));
+  };
+
+  if (buffered !== "") yield* feedText(buffered);
+  if (options.maxRecords === undefined || emitted < options.maxRecords) {
+    for (;;) {
+      const next = await take();
+      if (next === undefined) break;
+      yield* feedText(next);
+      if (options.maxRecords !== undefined && emitted >= options.maxRecords) break;
+    }
+  }
+  if (options.maxRecords === undefined || emitted < options.maxRecords) {
+    const { rows, unterminatedQuote } = tokenizer.finish();
+    if (unterminatedQuote) {
+      options.onIssue?.({
+        code: "CSV_STRUCTURE_WARNING",
+        severity: "warning",
+        message: "File ends inside a quoted cell (unterminated quote); the last record may be truncated.",
+      });
+    }
+    if (rows.length > 0) {
+      if (!headers) {
+        const normalised = normaliseHeaders(rows[0].cells);
+        for (const warning of normalised.warnings) {
+          options.onIssue?.({ code: "CSV_STRUCTURE_WARNING", severity: "warning", message: warning });
+        }
+        headers = normalised.headers;
+        yield* feedRows(rows.slice(1));
+      } else {
+        yield* feedRows(rows);
+      }
+    } else if (!headers) {
+      options.onIssue?.({ code: "CSV_STRUCTURE_WARNING", severity: "warning", message: "No tabular content found" });
+    }
+  }
+  yield* flushBatch();
+}
+
 /** Build one record per row, reporting ragged rows instead of padding silently. */
 export function buildCsvRecords(table: CsvTable): { records: CsvRecord[]; warnings: string[] } {
   const records: CsvRecord[] = [];

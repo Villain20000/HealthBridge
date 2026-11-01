@@ -95,6 +95,10 @@ export interface ApiKeyStore {
   listByWorkspace(workspaceId: string): Promise<ApiKeyRecord[]>;
   save(record: ApiKeyRecord): Promise<void>;
   update(id: string, patch: Partial<ApiKeyRecord>): Promise<void>;
+  /** Revokes every key that is still active; already-revoked keys keep their timestamp. */
+  revokeAll(workspaceId: string, revokedAt: string): Promise<number>;
+  /** Hard-deletes the keys of a purged workspace. */
+  deleteByWorkspace(workspaceId: string): Promise<number>;
 }
 
 export class InMemoryApiKeyStore implements ApiKeyStore {
@@ -126,6 +130,26 @@ export class InMemoryApiKeyStore implements ApiKeyStore {
     const record = this.records.get(id);
     if (!record) throw new Error(`API key ${id} not found`);
     this.records.set(id, { ...record, ...patch, id: record.id, workspaceId: record.workspaceId });
+  }
+
+  public async revokeAll(workspaceId: string, revokedAt: string): Promise<number> {
+    let revoked = 0;
+    for (const [id, record] of this.records) {
+      if (record.workspaceId !== workspaceId || record.revokedAt) continue;
+      this.records.set(id, { ...record, revokedAt });
+      revoked++;
+    }
+    return revoked;
+  }
+
+  public async deleteByWorkspace(workspaceId: string): Promise<number> {
+    let deleted = 0;
+    for (const [id, record] of this.records) {
+      if (record.workspaceId !== workspaceId) continue;
+      this.records.delete(id);
+      deleted++;
+    }
+    return deleted;
   }
 }
 

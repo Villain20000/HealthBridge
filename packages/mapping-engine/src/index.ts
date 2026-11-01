@@ -34,6 +34,7 @@ export const TRANSFORM_FUNCTIONS: readonly TransformFunctionKind[] = [
   "default_value",
   "to_reference",
   "codeable_concept",
+  "convert_units",
 ];
 
 export type RuleStatus = "mapped" | "defaulted" | "missing" | "rejected" | "condition_not_met" | "skipped";
@@ -266,14 +267,146 @@ function num(value: unknown): number | undefined {
   return undefined;
 }
 
+/* -------------------------------------------------------------------------- */
+/* UCUM-subset unit conversion (convert_units)                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Validated UCUM-subset factor table for common clinical units. Each entry
+ * maps a unit to its dimension and its factor relative to that dimension's
+ * canonical unit. Conversions are only ever computed from this table —
+ * unknown units are rejected, never guessed.
+ */
+interface UnitEntry {
+  dimension: string;
+  /** Multiply a value in this unit to obtain the canonical unit of the dimension. */
+  toCanonical: number;
+}
+
+const UNIT_TABLE: Record<string, UnitEntry> = {
+  // volume (canonical litre)
+  L: { dimension: "volume", toCanonical: 1 },
+  dL: { dimension: "volume", toCanonical: 1e-1 },
+  cL: { dimension: "volume", toCanonical: 1e-2 },
+  mL: { dimension: "volume", toCanonical: 1e-3 },
+  uL: { dimension: "volume", toCanonical: 1e-6 },
+  // mass (canonical gram)
+  kg: { dimension: "mass", toCanonical: 1e3 },
+  g: { dimension: "mass", toCanonical: 1 },
+  mg: { dimension: "mass", toCanonical: 1e-3 },
+  ug: { dimension: "mass", toCanonical: 1e-6 },
+  ng: { dimension: "mass", toCanonical: 1e-9 },
+  // mass concentration (canonical gram per litre)
+  "g/L": { dimension: "mass-concentration", toCanonical: 1 },
+  "g/dL": { dimension: "mass-concentration", toCanonical: 10 },
+  "mg/dL": { dimension: "mass-concentration", toCanonical: 1e-2 },
+  "mg/L": { dimension: "mass-concentration", toCanonical: 1e-3 },
+  "ug/mL": { dimension: "mass-concentration", toCanonical: 1e-3 },
+  "ng/mL": { dimension: "mass-concentration", toCanonical: 1e-6 },
+  // substance concentration (canonical mole per litre)
+  "mol/L": { dimension: "amount-concentration", toCanonical: 1 },
+  "mmol/L": { dimension: "amount-concentration", toCanonical: 1e-3 },
+  "umol/L": { dimension: "amount-concentration", toCanonical: 1e-6 },
+  // length (canonical metre)
+  m: { dimension: "length", toCanonical: 1 },
+  cm: { dimension: "length", toCanonical: 1e-2 },
+  mm: { dimension: "length", toCanonical: 1e-3 },
+};
+
+/** Explicit, documented aliases — resolved before table lookup, never guessed. */
+const UNIT_ALIASES: Record<string, string> = {
+  mcg: "ug",
+};
+
+/** Units accepted by `convert_units`, for issue advice and static validation. */
+export const CONVERTIBLE_UNITS: readonly string[] = Object.keys(UNIT_TABLE);
+
+/** Normalise a unit spelling: trim, fold micro signs to `u`, resolve aliases. */
+export function normaliseUnit(unit: string): string {
+  const folded = unit.trim().replace(/[µμ]/g, "u");
+  return UNIT_ALIASES[folded] ?? folded;
+}
+
+/** Look a normalised unit up in the validated table. */
+export function lookupUnit(unit: string): UnitEntry | undefined {
+  return UNIT_TABLE[normaliseUnit(unit)];
+}
+
+function readUnitParam(params: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const candidate = params[key];
+    if (typeof candidate === "string" && candidate.trim() !== "") return candidate.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Convert `value` from one unit to another within the validated UCUM subset.
+ * Unknown units and cross-dimension conversions are rejected with an explicit
+ * issue — the magnitude is never guessed.
+ */
+export function convertUnits(
+  value: number,
+  from: string,
+  to: string,
+): { ok: true; value: number } | { ok: false; issue: NonNullable<TransformOutcome["issue"]> } {
+  const fromEntry = lookupUnit(from);
+  if (!fromEntry) {
+    return {
+      ok: false,
+      issue: {
+        code: "UNKNOWN_UNIT",
+        severity: "warning",
+        message: `Unknown unit '${from}'; conversions use only the documented UCUM subset (${CONVERTIBLE_UNITS.join(", ")})`,
+        advice: "Use a unit from the documented subset, or add an explicit mapping rule instead of converting.",
+      },
+    };
+  }
+  const toEntry = lookupUnit(to);
+  if (!toEntry) {
+    return {
+      ok: false,
+      issue: {
+        code: "UNKNOWN_UNIT",
+        severity: "warning",
+        message: `Unknown unit '${to}'; conversions use only the documented UCUM subset (${CONVERTIBLE_UNITS.join(", ")})`,
+        advice: "Use a unit from the documented subset, or add an explicit mapping rule instead of converting.",
+      },
+    };
+  }
+  if (fromEntry.dimension !== toEntry.dimension) {
+    return {
+      ok: false,
+      issue: {
+        code: "INCOMPATIBLE_UNITS",
+        severity: "warning",
+        message: `Cannot convert '${from}' (${fromEntry.dimension}) to '${to}' (${toEntry.dimension})`,
+        advice: "Convert only within a single dimension (volume, mass, concentration, length).",
+      },
+    };
+  }
+  return { ok: true, value: (value * fromEntry.toCanonical) / toEntry.toCanonical };
+}
+
 /**
  * Apply one deterministic transform. Transform functions never invent clinical
  * meaning: when a value cannot be converted the rule is *rejected* and an issue
  * is reported, so nothing is silently written with a wrong type.
  */
-export function applyTransform(value: unknown, rule: MappingRule, source: Record<string, unknown>): TransformOutcome {
+export function applyTransform(
+  value: unknown,
+  rule: MappingRule,
+  source: Record<string, unknown>,
+  /**
+   * Field reader for transforms that consume other fields (`concat` paths,
+   * CodeableConcept display/text paths). Defaults to plain source lookup; the
+   * engine passes a namespace-aware reader so chained/batch fields resolve.
+   */
+  resolveField?: (path: string) => unknown,
+): TransformOutcome {
   const params = rule.params ?? {};
   const text = toText(value);
+  const readField = (path: string): unknown => (resolveField ? resolveField(path) : getPath(source, path));
 
   switch (rule.transform) {
     case "identity":
@@ -328,9 +461,7 @@ export function applyTransform(value: unknown, rule: MappingRule, source: Record
     case "concat": {
       const paths = Array.isArray(params.paths) ? (params.paths as string[]) : [];
       const separator = typeof params.separator === "string" ? params.separator : "";
-      const parts = (paths.length > 0 ? paths.map((p) => toText(getPath(source, p))) : [text]).filter(
-        (part) => part !== "",
-      );
+      const parts = (paths.length > 0 ? paths.map((p) => toText(readField(p))) : [text]).filter((part) => part !== "");
       if (parts.length === 0) {
         return {
           ok: false,
@@ -441,6 +572,39 @@ export function applyTransform(value: unknown, rule: MappingRule, source: Record
       return { ok: true, value: { reference: `${resourceType}/${id}` } };
     }
 
+    case "convert_units": {
+      const from = readUnitParam(params, ["from", "fromUnit"]);
+      const to = readUnitParam(params, ["to", "toUnit"]);
+      if (!from || !to) {
+        return {
+          ok: false,
+          issue: {
+            code: "CONVERT_UNITS_MISSING_PARAMS",
+            severity: "warning",
+            message:
+              "Transform 'convert_units' requires params.from and params.to (accepted aliases: fromUnit, toUnit)",
+            advice: "Set params.from and params.to to units from the documented UCUM subset.",
+          },
+        };
+      }
+      const numeric = typeof value === "number" ? value : Number(text.trim().replace(/\s/g, ""));
+      if (text.trim() === "" || !Number.isFinite(numeric)) {
+        return {
+          ok: false,
+          issue: {
+            code: "INVALID_NUMBER",
+            severity: "warning",
+            message: `Value '${text}' cannot be converted to a number for unit conversion`,
+          },
+        };
+      }
+      const converted = convertUnits(numeric, from, to);
+      if (!converted.ok) {
+        return { ok: false, issue: converted.issue };
+      }
+      return { ok: true, value: converted.value };
+    }
+
     case "codeable_concept": {
       const system = typeof params.system === "string" ? params.system : undefined;
       if (!system) {
@@ -464,11 +628,11 @@ export function applyTransform(value: unknown, rule: MappingRule, source: Record
           },
         };
       }
-      const displayFrom = typeof params.displayPath === "string" ? toText(getPath(source, params.displayPath)) : "";
+      const displayFrom = typeof params.displayPath === "string" ? toText(readField(params.displayPath)) : "";
       const coding: Record<string, unknown> = { system, code };
       if (displayFrom) coding.display = displayFrom;
       const concept: Record<string, unknown> = { coding: [coding] };
-      const textFrom = typeof params.textPath === "string" ? toText(getPath(source, params.textPath)) : "";
+      const textFrom = typeof params.textPath === "string" ? toText(readField(params.textPath)) : "";
       if (textFrom) concept.text = textFrom;
       else if (params.useCodeAsText === true) concept.text = displayFrom || code;
       return { ok: true, value: concept };
@@ -483,11 +647,145 @@ function assertNeverTransform(value: never): never {
   throw new Error(`Unhandled transform '${String(value)}' — update applyTransform and TRANSFORM_FUNCTIONS`);
 }
 
-function conditionsMatch(conditions: RuleCondition[] | undefined, source: Record<string, unknown>): boolean {
+/* -------------------------------------------------------------------------- */
+/* Rule namespaces: chaining and cross-record context                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Namespaces a rule may read in addition to plain source fields. All three are
+ * additive: mappings that never use them behave exactly as before.
+ *
+ * - `__rule.<ruleId>[.<subpath>]` reads a value produced by an earlier rule in
+ *   the same record (rule chaining).
+ * - `__batch.<index>.<path>` reads a source field of batch record `<index>`
+ *   (only inside `executeBatch` with `allowCrossRecordContext`).
+ * - `__output.<index>.<path>` reads an already-produced target field of batch
+ *   record `<index>` (only earlier records; used for reference linking such as
+ *   DiagnosticReport → Observation).
+ */
+const RULE_NAMESPACE = "__rule.";
+const BATCH_NAMESPACE = "__batch.";
+const OUTPUT_NAMESPACE = "__output.";
+
+export type ReferenceErrorCode =
+  "UNKNOWN_RULE_REFERENCE" | "RULE_REFERENCE_NOT_READY" | "UNKNOWN_BATCH_REFERENCE" | "BATCH_REFERENCE_NOT_READY";
+
+export interface RecordResolutionScope {
+  source: Record<string, unknown>;
+  /** Values produced by earlier rules in this record (presence = ready). */
+  ruleOutputs: Map<string, unknown>;
+  /** Every rule id declared by the mapping, for unknown-reference reporting. */
+  knownRuleIds: Set<string>;
+  /** All batch sources; present only inside `executeBatch` with the flag set. */
+  batchSources?: Array<Record<string, unknown>>;
+  /** Targets produced by earlier batch records; same gating as `batchSources`. */
+  batchOutputs?: Array<Record<string, unknown>>;
+  /** Index of the record being mapped inside the batch. */
+  batchIndex?: number;
+}
+
+export type ReferenceResolution =
+  { ok: true; value: unknown } | { ok: false; code: ReferenceErrorCode; message: string };
+
+function isSpecialPath(path: string): boolean {
+  return path.startsWith(RULE_NAMESPACE) || path.startsWith(BATCH_NAMESPACE) || path.startsWith(OUTPUT_NAMESPACE);
+}
+
+function parseBatchHead(path: string, namespace: string): { index: number; rest: string } | undefined {
+  const remainder = path.slice(namespace.length);
+  const dot = remainder.indexOf(".");
+  if (dot === -1) return undefined;
+  const index = Number(remainder.slice(0, dot));
+  if (!Number.isInteger(index) || index < 0) return undefined;
+  return { index, rest: remainder.slice(dot + 1) };
+}
+
+/** Resolve a `__rule.` / `__batch.` / `__output.` reference; plain paths are read from the source. */
+export function resolveReference(path: string, scope: RecordResolutionScope): ReferenceResolution {
+  if (path.startsWith(RULE_NAMESPACE)) {
+    const remainder = path.slice(RULE_NAMESPACE.length);
+    const dot = remainder.indexOf(".");
+    const ruleId = dot === -1 ? remainder : remainder.slice(0, dot);
+    const subPath = dot === -1 ? "" : remainder.slice(dot + 1);
+    if (ruleId === "" || !scope.knownRuleIds.has(ruleId)) {
+      return {
+        ok: false,
+        code: "UNKNOWN_RULE_REFERENCE",
+        message: `Reference '${path}' names no rule in this mapping`,
+      };
+    }
+    if (!scope.ruleOutputs.has(ruleId)) {
+      return {
+        ok: false,
+        code: "RULE_REFERENCE_NOT_READY",
+        message: `Reference '${path}' reads rule '${ruleId}' before it has produced a value`,
+      };
+    }
+    const produced = scope.ruleOutputs.get(ruleId);
+    return { ok: true, value: subPath === "" ? produced : getPath(produced, subPath) };
+  }
+
+  if (path.startsWith(BATCH_NAMESPACE)) {
+    if (!scope.batchSources) {
+      return {
+        ok: false,
+        code: "UNKNOWN_BATCH_REFERENCE",
+        message: `Reference '${path}' needs batch context: use executeBatch with allowCrossRecordContext`,
+      };
+    }
+    const head = parseBatchHead(path, BATCH_NAMESPACE);
+    if (!head || head.index >= scope.batchSources.length) {
+      return {
+        ok: false,
+        code: "UNKNOWN_BATCH_REFERENCE",
+        message: `Reference '${path}' is outside the batch (size ${scope.batchSources.length})`,
+      };
+    }
+    return { ok: true, value: getPath(scope.batchSources[head.index] ?? {}, head.rest) };
+  }
+
+  if (path.startsWith(OUTPUT_NAMESPACE)) {
+    const batchOutputs = scope.batchOutputs;
+    const batchSources = scope.batchSources;
+    const batchIndex = scope.batchIndex;
+    if (!batchOutputs || !batchSources || batchIndex === undefined) {
+      return {
+        ok: false,
+        code: "UNKNOWN_BATCH_REFERENCE",
+        message: `Reference '${path}' needs batch context: use executeBatch with allowCrossRecordContext`,
+      };
+    }
+    const head = parseBatchHead(path, OUTPUT_NAMESPACE);
+    if (!head || head.index >= batchSources.length) {
+      return {
+        ok: false,
+        code: "UNKNOWN_BATCH_REFERENCE",
+        message: `Reference '${path}' is outside the batch (size ${batchSources.length})`,
+      };
+    }
+    if (head.index >= batchIndex) {
+      return {
+        ok: false,
+        code: "BATCH_REFERENCE_NOT_READY",
+        message: `Reference '${path}' reads a record that has not been mapped yet`,
+      };
+    }
+    return { ok: true, value: getPath(batchOutputs[head.index] ?? {}, head.rest) };
+  }
+
+  return { ok: true, value: getPath(scope.source, path) };
+}
+
+function conditionsMatch(conditions: RuleCondition[] | undefined, scope: RecordResolutionScope): boolean {
   if (!conditions || conditions.length === 0) return true;
 
   return conditions.every((condition) => {
-    const actual = getPath(source, condition.path);
+    // An unresolvable reference behaves like a missing value: `exists` is
+    // false, `not_exists` is true, every comparison is false.
+    const resolved = isSpecialPath(condition.path)
+      ? resolveReference(condition.path, scope)
+      : { ok: true as const, value: getPath(scope.source, condition.path) };
+    const actual = resolved.ok ? resolved.value : undefined;
     switch (condition.op) {
       case "exists":
         return actual !== undefined && actual !== null && actual !== "";
@@ -529,8 +827,170 @@ function pathMatches(leafPath: string, rulePath: string): boolean {
   return leafPath === rulePath || leafPath.startsWith(`${rulePath}.`) || rulePath.startsWith(`${leafPath}.`);
 }
 
+function readRuleUnitParam(rule: MappingRule, keys: string[]): string | undefined {
+  const params = rule.params;
+  if (!params || typeof params !== "object") return undefined;
+  for (const key of keys) {
+    const candidate = (params as Record<string, unknown>)[key];
+    if (typeof candidate === "string" && candidate.trim() !== "") return candidate.trim();
+  }
+  return undefined;
+}
+
+/**
+ * Static checks for `convert_units` rules: both units must be named and both
+ * must belong to the validated UCUM subset in a single dimension. Unknown
+ * units are an authoring error, never a silent guess.
+ */
+function validateUnitParams(rule: MappingRule): ValidationIssue[] {
+  const from = readRuleUnitParam(rule, ["from", "fromUnit"]);
+  const to = readRuleUnitParam(rule, ["to", "toUnit"]);
+  if (!from || !to) {
+    return [
+      {
+        code: "MAPPING_MISSING_UNIT_PARAMS",
+        severity: "error",
+        message: `Rule '${rule.id}' uses convert_units without params.from and params.to`,
+        ruleId: rule.id,
+        advice: "Set params.from and params.to to units from the documented UCUM subset.",
+      },
+    ];
+  }
+  const fromEntry = lookupUnit(from);
+  if (!fromEntry) {
+    return [
+      {
+        code: "MAPPING_UNKNOWN_UNIT",
+        severity: "error",
+        message: `Rule '${rule.id}' converts from unknown unit '${from}'`,
+        ruleId: rule.id,
+        advice: `Supported units: ${CONVERTIBLE_UNITS.join(", ")}`,
+      },
+    ];
+  }
+  const toEntry = lookupUnit(to);
+  if (!toEntry) {
+    return [
+      {
+        code: "MAPPING_UNKNOWN_UNIT",
+        severity: "error",
+        message: `Rule '${rule.id}' converts to unknown unit '${to}'`,
+        ruleId: rule.id,
+        advice: `Supported units: ${CONVERTIBLE_UNITS.join(", ")}`,
+      },
+    ];
+  }
+  if (fromEntry.dimension !== toEntry.dimension) {
+    return [
+      {
+        code: "MAPPING_INCOMPATIBLE_UNITS",
+        severity: "error",
+        message: `Rule '${rule.id}' converts '${from}' (${fromEntry.dimension}) to '${to}' (${toEntry.dimension})`,
+        ruleId: rule.id,
+        advice: "Convert only within a single dimension (volume, mass, concentration, length).",
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * Static checks for `__rule.` / `__batch.` / `__output.` references: the
+ * target must exist, must not be a forward reference, and batch namespaces
+ * require `allowCrossRecordContext` on the mapping.
+ */
+function validateRuleReference(rule: MappingRule, mapping: MappingDefinition): ValidationIssue[] {
+  const sourcePath = rule.sourcePath;
+  if (sourcePath.startsWith(RULE_NAMESPACE)) {
+    const remainder = sourcePath.slice(RULE_NAMESPACE.length);
+    const ruleId = remainder.split(".")[0] ?? "";
+    const targetIndex = mapping.rules.findIndex((candidate) => candidate.id === ruleId);
+    if (ruleId === "" || targetIndex === -1) {
+      return [
+        {
+          code: "MAPPING_UNKNOWN_RULE_REFERENCE",
+          severity: "error",
+          message: `Rule '${rule.id}' references unknown rule '${ruleId}'`,
+          path: sourcePath,
+          ruleId: rule.id,
+        },
+      ];
+    }
+    const ownIndex = mapping.rules.findIndex((candidate) => candidate.id === rule.id);
+    if (targetIndex >= ownIndex) {
+      return [
+        {
+          code: "MAPPING_FORWARD_RULE_REFERENCE",
+          severity: "error",
+          message: `Rule '${rule.id}' reads rule '${ruleId}' before it runs; rules execute in order`,
+          path: sourcePath,
+          ruleId: rule.id,
+          advice: "Reference only rules declared earlier in the mapping.",
+        },
+      ];
+    }
+    return [];
+  }
+  if (!mapping.allowCrossRecordContext) {
+    return [
+      {
+        code: "MAPPING_BATCH_REFERENCE_WITHOUT_CONTEXT",
+        severity: "error",
+        message: `Rule '${rule.id}' uses batch reference '${sourcePath}' but the mapping does not set allowCrossRecordContext`,
+        path: sourcePath,
+        ruleId: rule.id,
+        advice: "Set allowCrossRecordContext: true on the mapping, or use a plain source field.",
+      },
+    ];
+  }
+  return [];
+}
+
+export interface BatchExecutionContext {
+  /** Every source record in the batch, in order. */
+  sources: Array<Record<string, unknown>>;
+  /** Targets produced by earlier batch records, in order. */
+  outputs: Array<Record<string, unknown>>;
+  /** Index of the record being mapped. */
+  index: number;
+}
+
 export class MappingEngine {
   public execute(sourceData: Record<string, unknown>, mapping: MappingDefinition): MappingExecutionResult {
+    return this.executeWithScope(sourceData, mapping, undefined);
+  }
+
+  /**
+   * Map a batch of records. Without `allowCrossRecordContext` this is exactly
+   * `sources.map((source) => this.execute(source, mapping))` — same results,
+   * same issues. With the flag set, rules may additionally read sibling
+   * records (`__batch.<index>.<path>`) and already-produced targets
+   * (`__output.<index>.<path>`), so a DiagnosticReport row can link the
+   * Observation resources produced from other rows. Pure: inputs are never
+   * mutated and records are processed in order.
+   */
+  public executeBatch(sources: Array<Record<string, unknown>>, mapping: MappingDefinition): MappingExecutionResult[] {
+    if (!mapping.allowCrossRecordContext) {
+      return sources.map((source) => this.execute(source, mapping));
+    }
+    const results: MappingExecutionResult[] = [];
+    for (let index = 0; index < sources.length; index++) {
+      results.push(
+        this.executeWithScope(sources[index] ?? {}, mapping, {
+          sources,
+          outputs: results.map((result) => result.targetData),
+          index,
+        }),
+      );
+    }
+    return results;
+  }
+
+  private executeWithScope(
+    sourceData: Record<string, unknown>,
+    mapping: MappingDefinition,
+    batch: BatchExecutionContext | undefined,
+  ): MappingExecutionResult {
     const targetData = createRootForPath(mapping.rules[0]?.targetPath ?? "id") as Record<string, unknown>;
     const issues: ValidationIssue[] = [];
     const ruleResults: RuleExecutionResult[] = [];
@@ -540,11 +1000,53 @@ export class MappingEngine {
     const rejectedLeaves = new Set<string>();
     let targetFieldsPopulated = 0;
 
+    const knownRuleIds = new Set(mapping.rules.map((rule) => rule.id));
+    const ruleOutputs = new Map<string, unknown>();
+    const scopeFor = (): RecordResolutionScope => ({
+      source: sourceData,
+      ruleOutputs,
+      knownRuleIds,
+      batchSources: batch?.sources,
+      batchOutputs: batch?.outputs,
+      batchIndex: batch?.index,
+    });
+    // Reads through the same namespace machinery as `sourcePath`, so `concat`
+    // `paths` and CodeableConcept display/text paths can chain too.
+    const readField = (path: string): unknown => {
+      const resolved = resolveReference(path, scopeFor());
+      return resolved.ok ? resolved.value : undefined;
+    };
+
     for (const rule of mapping.rules) {
-      const rawValue = getPath(sourceData, rule.sourcePath);
+      const fromReference = isSpecialPath(rule.sourcePath)
+        ? resolveReference(rule.sourcePath, scopeFor())
+        : { ok: true as const, value: getPath(sourceData, rule.sourcePath) };
+      if (!fromReference.ok) {
+        const failure = fromReference;
+        issues.push({
+          code: failure.code,
+          severity: rule.required ? "error" : "warning",
+          message: failure.message,
+          path: rule.sourcePath,
+          ruleId: rule.id,
+          advice: rule.required
+            ? "Required element rejected: the record will not be exported."
+            : "Point the rule at an earlier rule, an in-range batch record, or a plain source field.",
+        });
+        rejectedLeaves.add(rule.sourcePath);
+        ruleResults.push({
+          ruleId: rule.id,
+          sourcePath: rule.sourcePath,
+          targetPath: rule.targetPath,
+          transform: rule.transform,
+          status: "rejected",
+        });
+        continue;
+      }
+      const rawValue = fromReference.value;
       const isPresent = rawValue !== undefined && rawValue !== null && toText(rawValue) !== "";
 
-      if (!conditionsMatch(rule.when, sourceData)) {
+      if (!conditionsMatch(rule.when, scopeFor())) {
         ruleResults.push({
           ruleId: rule.id,
           sourcePath: rule.sourcePath,
@@ -565,7 +1067,7 @@ export class MappingEngine {
             ruleId: rule.id,
             advice: "Provide the source field, or set rule.defaultValue.",
           });
-          rejectedLeaves.add(rule.sourcePath);
+          if (!isSpecialPath(rule.sourcePath)) rejectedLeaves.add(rule.sourcePath);
           ruleResults.push({
             ruleId: rule.id,
             sourcePath: rule.sourcePath,
@@ -586,7 +1088,7 @@ export class MappingEngine {
       }
 
       const value = isPresent ? rawValue : rule.defaultValue;
-      const outcome = applyTransform(value, rule, sourceData);
+      const outcome = applyTransform(value, rule, sourceData, readField);
 
       if (!outcome.ok) {
         const baseIssue = outcome.issue!;
@@ -601,7 +1103,7 @@ export class MappingEngine {
             ? `${baseIssue.advice ?? ""} Required element rejected: the record will not be exported.`.trim()
             : baseIssue.advice,
         });
-        if (isPresent) rejectedLeaves.add(rule.sourcePath);
+        if (isPresent && !isSpecialPath(rule.sourcePath)) rejectedLeaves.add(rule.sourcePath);
         ruleResults.push({
           ruleId: rule.id,
           sourcePath: rule.sourcePath,
@@ -618,7 +1120,8 @@ export class MappingEngine {
 
       setPath(targetData as Record<string, unknown>, rule.targetPath, outcome.value);
       targetFieldsPopulated++;
-      if (isPresent) {
+      ruleOutputs.set(rule.id, outcome.value);
+      if (isPresent && !isSpecialPath(rule.sourcePath)) {
         for (const leaf of sourceLeaves) {
           if (pathMatches(leaf, rule.sourcePath)) consumedLeaves.add(leaf);
         }
@@ -719,6 +1222,14 @@ export class MappingEngine {
           message: `Rule '${rule.id}' uses default_value without rule.defaultValue`,
           ruleId: rule.id,
         });
+      }
+
+      if (rule.transform === "convert_units") {
+        issues.push(...validateUnitParams(rule));
+      }
+
+      if (typeof rule.sourcePath === "string" && isSpecialPath(rule.sourcePath)) {
+        issues.push(...validateRuleReference(rule, mapping));
       }
 
       if (rule.targetPath) {
@@ -868,6 +1379,16 @@ function collectStructuralIssues(spec: Record<string, unknown>): ValidationIssue
         path: "sourceDomains",
       });
     }
+  }
+
+  const allowCrossRecordContext = readProperty(spec, "allowCrossRecordContext");
+  if (allowCrossRecordContext !== undefined && typeof allowCrossRecordContext !== "boolean") {
+    issues.push({
+      code: "MAPPING_INVALID_FIELD",
+      severity: "error",
+      message: "Mapping definition field 'allowCrossRecordContext' must be a boolean",
+      path: "allowCrossRecordContext",
+    });
   }
 
   const rules = readProperty(spec, "rules");

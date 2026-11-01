@@ -1,6 +1,6 @@
 # Healthcare Data Asset Explorer — planned
 
-**Status:** ⬜ not implemented · **Phase:** D3 · **UI today:** `/assets` lists uploads and links
+**Status:** 🟡 shipped (mapping-editor explorers + `GET /assets/:id/schema`); full asset record browser still planned · **Phase:** D3 · **UI today:** `/assets` lists uploads and links
 to the bytes; it does not browse records or generated resources.
 
 ## Why it matters

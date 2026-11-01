@@ -43,7 +43,7 @@ describe("healthbridge doctor", () => {
     assert.equal(code, EXIT_CODES.OK);
     const report = JSON.parse(out());
     assert.equal(report.status, "healthy");
-    assert.equal(report.adapters.length, 3);
+    assert.equal(report.adapters.length, 4);
     assert.ok(report.adapters.every((a: { ok: boolean }) => a.ok));
     assert.equal(report.selfTest.ok, true);
     assert.ok(report.nodeSupported);
@@ -64,7 +64,7 @@ describe("formats", () => {
     assert.equal(code, EXIT_CODES.OK);
     const manifests = JSON.parse(out());
     const formats = manifests.map((m: { format: string }) => m.format).sort();
-    assert.deepEqual(formats, ["csv", "fhir-r4-json", "json"]);
+    assert.deepEqual(formats, ["csv", "fhir-r4-json", "fhir-r4-ndjson", "json"]);
     assert.ok(manifests.every((m: { status?: string }) => Boolean(m.status)));
   });
 

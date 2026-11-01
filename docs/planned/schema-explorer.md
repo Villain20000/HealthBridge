@@ -1,6 +1,6 @@
 # Schema Explorer — planned
 
-**Status:** ⬜ not implemented · **Phase:** D3 · **UI today:** nothing (no route, no card).
+**Status:** 🟡 shipped (mapping-editor explorers + `GET /assets/:id/schema`); full explorer still planned · **Phase:** D3 · **UI today:** mapping editor embeds source/target schema explorers.
 
 ## Why it matters
 

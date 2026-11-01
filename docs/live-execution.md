@@ -1,6 +1,6 @@
-# Streaming and live execution — planned
+# Streaming and live execution — shipped (v1 process-local)
 
-**Status:** ⬜ not implemented · **Phase:** C/F/G · **UI today:** the debugger is explicitly
+**Status:** ✅ landed with real checkpoint semantics (chunked execution, pause/resume, cancel drops checkpoint; v1 is process-local) · **Phase:** C/F/G · **UI today:** the debugger is explicitly
 "stored traces, not live execution"; uploads and pipelines buffer.
 
 ## Why it matters

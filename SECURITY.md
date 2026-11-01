@@ -14,14 +14,14 @@ Security fixes land on the latest minor release only (`3.2.x` at time of writing
 
 **Redaction.** Traces are redacted structurally by default: object keys, array shapes and terminology fields (codes, units, status, …) stay readable, patient-data scalars are masked, and values quoted inside issue messages are masked too (protocol v1.2; see `docs/adr/ADR-0003-trace-redaction-policy.md`, which supersedes ADR-0002). Raw payload mode (`debug.payloadMode: "full"`) writes unredacted data to traces and must only be used locally.
 
-**No telemetry.** The engine makes no outbound network calls. The CLI is fully offline. Remote adapter support (FHIR REST, DICOMweb) does not exist yet.
+**No telemetry.** The engine makes no outbound network calls. The CLI is fully offline. The FHIR REST and DICOMweb adapters are opt-in network clients with SSRF allowlists (default-deny), timeouts, and query redaction in every log and error path — see `docs/security.md`.
 
 **Plugins are privileged code.** A registered adapter runs in-process with full filesystem and network access. There is no sandbox, no signature check and no capability restriction today. Install third-party adapters only from sources you trust. `healthbridge plugins list` shows only adapters actually registered.
 
 **Demo mode is not a deployment.** Without `DATABASE_URL` the API uses in-memory repositories, prints the bootstrap token at startup and reports `mode: demo` from `/healthz`. In production (`NODE_ENV=production`) it refuses to start without a database, a key pepper and a bootstrap token rather than degrading silently.
 
 **Parsing untrusted files.**
-- CSV/JSON/FHIR adapters are dependency-free; no XML parsing exists yet, so XXE is not currently reachable. A safe XML parser (entity expansion disabled) is a hard requirement for the CDA/XML adapters in Phase E.
+- CSV/JSON/FHIR/XLSX adapters are dependency-free. XML/CDA input is scanned by a dependency-free tag walker (never a general XML parser); `<!DOCTYPE`/`<!ENTITY` payloads are refused up front by the kit XXE guard (`assertSafeXml`), and CDATA payloads over 1 MiB are refused — see `docs/security.md`.
 - Inputs are held in memory; a large file can exhaust memory. Bound uploads and row counts (`--max-records`) until streaming lands.
 
 **API authentication and authorisation (`@healthbridge/api`).** Every endpoint except `/healthz`, `/version`, `/formats` and `POST /workspaces` requires an API key in `x-api-key`.
@@ -46,4 +46,19 @@ HealthBridge OS does not certify HIPAA, GDPR, MDR or any other regulatory regime
 
 ## Dependency and container hygiene
 
-`npm audit` and dependency review belong in CI (see `.github/workflows/ci.yml`). Report known-vulnerable transitive dependencies as issues rather than silently upgrading major versions.
+**Production dependency gate.** `npm run audit:prod` (`scripts/audit-prod.mjs`) audits the production tree (`npm audit --omit=dev`) and fails on any high or critical advisory, except for the dated exceptions listed in that script. It runs on every push and pull request (CI job **Production dependency audit**, which must be required in branch protection) and before packing a release. `node scripts/audit-prod.mjs --strict` ignores exceptions and must still fail while any high advisory remains.
+
+**Pinned transitive dependencies.** The root `overrides` in `package.json` pin patched versions that the direct dependents do not resolve themselves:
+
+| Override | Why |
+|---|---|
+| `multer@2.5.0` | NestJS 10.4 pins `multer@2.0.2`, which is affected by high-severity DoS advisories. The API accepts raw request bodies (`express.raw`), not multipart uploads, but the vulnerable code is still shipped in the dependency tree. |
+| `body-parser@1.20.9` | Patch release that fixes high-severity request-body DoS advisories in the 1.20 line used by NestJS 10 and Express 4. |
+| `qs@6.16.2` | Patched 6.x release; Express 4 resolves the affected `~6.14.0` range. |
+| `piscina@4.9.4`, `tar@7.5.22` | Patched versions of transitive build/packaging dependencies. |
+
+**Dated exception.** Angular 19 is end-of-life and has no patched 19.x release, so `@angular/common`, `@angular/compiler`, `@angular/core` and `@angular/router` are exempt until **2027-01-31** for high advisories. The console is a client-side SPA: it ships no SSR, hydration, `HttpTransferCache` or i18n runtime, and every template is authored in-repo. The exception is removed together with the Angular 20 upgrade; a critical advisory is never waived.
+
+**Moderate advisories.** The remaining moderate findings have no fix in the current majors: `file-type` (reachable only through multer's multipart handling, which the API does not use), the NestJS 10 packages that depend on it, and `@angular/forms` / `@angular/platform-browser`, which share the Angular 19 upgrade. They do not fail the gate and are removed with the Angular and NestJS upgrades. Report a regression or a new high/critical advisory as an issue rather than silently upgrading a major version.
+
+Dependency updates are proposed weekly by Dependabot (`.github/dependabot.yml`). Container scanning, SBOM generation and image signing are not implemented yet (tracked as OPS-004 in `MISSING.md`).

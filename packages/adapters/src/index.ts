@@ -8,9 +8,26 @@ import {
   ValidationIssue,
 } from "@healthbridge/shared-types";
 import { MedicalFormatAdapter, computeChecksum, createCanonicalEnvelope } from "@healthbridge/core";
+import { FhirNdjsonFormatAdapter } from "@healthbridge/fhir-ndjson";
 import { buildCsvRecords, decodeBuffer, readCsvTable } from "./csv.js";
 
 export * from "./csv.js";
+export * from "./kit.js";
+export * from "./vcf.js";
+export * from "./fasta.js";
+export * from "./hl7v2.js";
+export * from "./xml-cda.js";
+export * from "./xlsx.js";
+export * from "./dicom.js";
+export * from "./fhir-rest.js";
+export * from "./omop.js";
+export * from "./pdf.js";
+export * from "./edf.js";
+export * from "./mysql-connector.js";
+export * from "./dicomweb.js";
+export * from "./cdisc-odm.js";
+export * from "./fhir-validator.js";
+export * from "@healthbridge/fhir-ndjson";
 
 const DOMAIN_KEYWORDS: Array<{ domain: MedicalDomain; keywords: string[] }> = [
   {
@@ -349,7 +366,7 @@ export class JsonFormatAdapter implements MedicalFormatAdapter {
 }
 
 // ---------------------------------------------------------------------------
-// FHIR R4 (JSON bundle, single resource, NDJSON)
+// FHIR R4 (JSON bundle, single resource; NDJSON lives in @healthbridge/fhir-ndjson)
 // ---------------------------------------------------------------------------
 
 export class FhirJsonFormatAdapter implements MedicalFormatAdapter {
@@ -360,9 +377,9 @@ export class FhirJsonFormatAdapter implements MedicalFormatAdapter {
     return {
       format: "fhir-r4-json",
       version: "4.0.1",
-      description: "HL7 FHIR R4 JSON, Bundle and NDJSON adapter (structural inspection only)",
-      extensions: [".json", ".ndjson", ".fhir", ".fhir.json"],
-      mimeTypes: ["application/fhir+json", "application/x-ndjson"],
+      description: "HL7 FHIR R4 JSON and Bundle adapter (structural inspection only)",
+      extensions: [".json", ".fhir", ".fhir.json"],
+      mimeTypes: ["application/fhir+json"],
       status: "partial",
       limitations: [
         "Structural adapter only: profiles and terminology are not validated here.",
@@ -387,8 +404,11 @@ export class FhirJsonFormatAdapter implements MedicalFormatAdapter {
 
   public async score(input: InputDescriptor): Promise<number> {
     const name = (input.filename ?? "").toLowerCase();
-    if (name.endsWith(".ndjson") || name.endsWith(".fhir") || name.endsWith(".fhir.json")) return 0.95;
+    // NDJSON inputs belong to FhirNdjsonFormatAdapter (split out of this adapter).
+    if (name.endsWith(".ndjson")) return 0;
     const text = input.contentString ?? "";
+    if (looksLikeNdjson(text)) return 0;
+    if (name.endsWith(".fhir") || name.endsWith(".fhir.json")) return 0.95;
     if (text.includes('"resourceType"') || text.includes('"resourceType":')) return 0.9;
     if (input.mimeType === "application/fhir+json") return 0.9;
     return 0;
@@ -398,26 +418,6 @@ export class FhirJsonFormatAdapter implements MedicalFormatAdapter {
     const issues: ValidationIssue[] = [];
     const trimmed = text.trim();
     if (trimmed === "") return { resources: [], issues };
-
-    if (looksLikeNdjson(trimmed)) {
-      const resources: Array<Record<string, unknown>> = [];
-      const lines = trimmed.split(/\r?\n/);
-      lines.forEach((line, index) => {
-        if (line.trim() === "") return;
-        try {
-          const parsed = JSON.parse(line);
-          if (parsed && typeof parsed === "object") resources.push(parsed);
-        } catch (error) {
-          issues.push({
-            code: "MALFORMED_NDJSON_LINE",
-            severity: "warning",
-            message: `NDJSON line ${index + 1} is not valid JSON: ${(error as Error).message}`,
-            location: `line ${index + 1}`,
-          });
-        }
-      });
-      return { resources, issues };
-    }
 
     try {
       const parsed = JSON.parse(trimmed);
@@ -508,5 +508,5 @@ export class FhirJsonFormatAdapter implements MedicalFormatAdapter {
 
 /** Built-in adapter bundle used by the engine, SDK, CLI and API. */
 export function createBuiltInAdapters(): MedicalFormatAdapter[] {
-  return [new CsvFormatAdapter(), new JsonFormatAdapter(), new FhirJsonFormatAdapter()];
+  return [new CsvFormatAdapter(), new JsonFormatAdapter(), new FhirJsonFormatAdapter(), new FhirNdjsonFormatAdapter()];
 }

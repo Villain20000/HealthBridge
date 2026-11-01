@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SECURITY FIXTURE — entity-expansion ("billion laughs") shaped bomb.
+  Kept deliberately small (3 levels): it must be REFUSED by the kit XXE
+  guard (any <!ENTITY declaration) before any expansion could occur, so the
+  fixture itself never needs to be large to prove the point. Expanding this
+  by hand — or adding more levels — is unnecessary and would only bloat the
+  repo; the guard rejects on the declaration, not on the output size.
+-->
+<!DOCTYPE lolz [
+  <!ENTITY lol "lollollollollollollollollollol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+  <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+]>
+<labReport lab="central">
+  <patient id="P-EVIL">
+    <name>&lol3;</name>
+  </patient>
+  <result code="GLU" value="&lol2;"/>
+</labReport>

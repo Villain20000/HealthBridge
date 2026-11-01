@@ -8,14 +8,16 @@ import {
   MySqlJobStore,
   type Repositories,
 } from "@healthbridge/persistence";
-import { LocalFileStorage, MemoryStorageDriver, type StorageDriver } from "@healthbridge/storage";
-import type { ApiConfig } from "./config.js";
+import { LocalFileStorage, MemoryStorageDriver, S3StorageDriver, type StorageDriver } from "@healthbridge/storage";
+import { ConfigError, type ApiConfig } from "./config.js";
 import { BootstrapRateLimiter } from "./common/bootstrap-rate-limiter.js";
+import { BullMqJobStore, createBullMqJobStore } from "./jobs/bullmq-queue.js";
 import { RunQueue } from "./jobs/run-queue.js";
 import { createRunWorker } from "./jobs/run-worker.js";
 import { AuditService } from "./services/audit.service.js";
 import { MappingPreviewService } from "./services/mapping-preview.service.js";
 import { MappingStudioService } from "./services/mapping-studio.service.js";
+import { RetentionService } from "./services/retention.service.js";
 import { RunService } from "./services/run.service.js";
 
 /**
@@ -37,6 +39,7 @@ export interface AppContext {
   studio: MappingStudioService;
   preview: MappingPreviewService;
   runs: RunService;
+  retention: RetentionService;
   startedAt: string;
   close(): Promise<void>;
 }
@@ -47,6 +50,37 @@ export interface CreateContextOptions {
   storage?: StorageDriver;
   now?: () => Date;
   log?: (message: string) => void;
+}
+
+/**
+ * Select the storage driver. S3 wins when `config.storage.s3` is present
+ * (credentials resolve inside the driver from `HEALTHBRIDGE_S3_*` / `AWS_*`,
+ * the same precedence as `s3OptionsFromEnv`); otherwise the historical
+ * local/memory default is returned unchanged. A requested-but-unbuildable S3
+ * driver is a startup failure, never a silent fallback to local disk, and the
+ * error carries no secrets.
+ */
+function createStorageDriver(config: ApiConfig, logger: Logger): StorageDriver {
+  const s3 = config.storage.s3;
+  if (!s3) {
+    return config.nodeEnv === "test"
+      ? new MemoryStorageDriver({ maxObjectBytes: config.limits.maxUploadBytes })
+      : new LocalFileStorage({ rootDir: config.storage.rootDir, maxObjectBytes: config.limits.maxUploadBytes });
+  }
+  try {
+    const driver = new S3StorageDriver({
+      endpoint: s3.endpoint,
+      bucket: s3.bucket,
+      region: s3.region,
+      forcePathStyle: s3.forcePathStyle,
+      maxObjectBytes: config.limits.maxUploadBytes,
+    });
+    logger.log(`storage: s3 ${s3.endpoint}/${s3.bucket} (region ${s3.region})`);
+    return driver;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new ConfigError(`S3 storage is configured but cannot be used: ${reason}`);
+  }
 }
 
 export async function createAppContext(options: CreateContextOptions): Promise<AppContext> {
@@ -72,11 +106,7 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
     );
   }
 
-  const storage =
-    options.storage ??
-    (config.nodeEnv === "test"
-      ? new MemoryStorageDriver({ maxObjectBytes: config.limits.maxUploadBytes })
-      : new LocalFileStorage({ rootDir: config.storage.rootDir, maxObjectBytes: config.limits.maxUploadBytes }));
+  const storage = options.storage ?? createStorageDriver(config, logger);
 
   const apiKeys = new ApiKeyService({
     pepper: config.auth.pepper,
@@ -102,9 +132,18 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
   const studio = new MappingStudioService({ repos, audit, now });
   const preview = new MappingPreviewService({ repos, storage, audit, config });
 
+  // Queue driver selection (ADR-0004 stays the default): BullMQ wins only when
+  // `config.queue.redis` is present (`HEALTHBRIDGE_REDIS_URL`/`REDIS_URL`).
+  // Otherwise the historical MySQL/process default is returned unchanged. A
+  // selected-but-unreachable Redis is a startup failure, never a silent fallback.
   // In database mode the queue is a table: enqueue persists, every replica polls, and a
   // restart resumes whatever was pending instead of dropping it.
-  const jobStore = config.database && connection ? new MySqlJobStore(connection, now) : undefined;
+  const jobStore =
+    config.queue.redis !== undefined
+      ? await createBullMqJobStore({ url: config.queue.redis.url, now })
+      : config.database && connection
+        ? new MySqlJobStore(connection, now)
+        : undefined;
 
   const queue = new RunQueue({
     concurrency: config.queue.concurrency,
@@ -118,13 +157,15 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
     visibilityTimeoutMs: config.queue.visibilityTimeoutMs,
   });
 
-  if (jobStore) {
+  if (jobStore instanceof MySqlJobStore) {
     const counts = await jobStore.countByStatus().catch(() => undefined);
     const resumed = counts ? counts.pending + counts.claimed : 0;
     if (resumed > 0) logger.log(`queue: resuming ${resumed} unfinished job(s) from the database`);
   }
 
   const runs = new RunService({ repos, queue, audit, now, config });
+  const retention = new RetentionService({ repos, storage, audit, config, now, log });
+  retention.start();
 
   return {
     config,
@@ -138,9 +179,12 @@ export async function createAppContext(options: CreateContextOptions): Promise<A
     studio,
     preview,
     runs,
+    retention,
     startedAt: now().toISOString(),
     close: async () => {
+      retention.stop();
       await queue.shutdown();
+      if (jobStore instanceof BullMqJobStore) await jobStore.close();
       await repos.close();
     },
   };

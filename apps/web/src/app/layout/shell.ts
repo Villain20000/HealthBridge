@@ -51,7 +51,7 @@ import type { Health } from "../core/api-types";
             <span class="spinner" role="status" aria-label="Request in flight"></span>
           }
           @if (auth.isConnected()) {
-            <span class="chip plain muted" [title]="'API key ' + (auth.keyPrefix() ?? '')">{{ auth.keyPrefix() }}</span>
+            <span class="chip plain muted" [title]="'API key ' + auth.keyPrefix()">{{ auth.keyPrefix() }}</span>
             <button type="button" class="small ghost" (click)="disconnect()">Disconnect</button>
           }
           <button type="button" class="small ghost" (click)="toggleTheme()" [attr.aria-label]="themeLabel()">
