@@ -13,6 +13,14 @@ import {
   mergeIssues,
   stageSummary,
 } from "../src/app/features/studio/debugger/trace.logic";
+import {
+  matchesBreakpoint,
+  findNextBreakpoint,
+  findNextErrorIndex,
+  findNextRecordIndex,
+  evaluateRuleConditions,
+} from "../src/app/features/studio/debugger/breakpoints.logic";
+import type { Breakpoint } from "../src/app/features/studio/debugger/breakpoints.logic";
 
 /**
  * Stored-trace replay is a reading tool, not an observer. Every row below is synthetic, and
@@ -574,6 +582,165 @@ describe("describeTraceAvailability", () => {
       message:
         "This run is still synthetic-status; the stored trace is partial. Refresh to load rows written since this page opened.",
       canRefresh: true,
+    });
+  });
+});
+
+describe("breakpoints.logic", () => {
+  const events = buildTimeline([
+    payloadRow(1, { stage: "parse", status: "success", recordIndex: 0 }),
+    payloadRow(2, { stage: "mapping", status: "success", recordIndex: 0, ruleId: "rule-gender" }),
+    payloadRow(3, {
+      stage: "mapping",
+      status: "warning",
+      recordIndex: 1,
+      ruleId: "rule-birthdate",
+      inputSnippet: { patient: { birthDate: "1980-05-12", active: true } },
+      issues: [issue({ code: "WARN_FORMAT", severity: "warning" })],
+    }),
+    payloadRow(4, {
+      stage: "validate",
+      status: "error",
+      recordIndex: 1,
+      issues: [issue({ code: "ERR_SCHEMA", severity: "error" })],
+    }),
+    payloadRow(5, { stage: "export", status: "success", recordIndex: 2 }),
+  ]);
+
+  describe("matchesBreakpoint", () => {
+    it("matches seq breakpoint", () => {
+      const bp: Breakpoint = { id: "bp-1", kind: "seq", enabled: true, value: 3 };
+      assert.equal(matchesBreakpoint(events[2], bp), true);
+      assert.equal(matchesBreakpoint(events[1], bp), false);
+    });
+
+    it("matches status breakpoint", () => {
+      const bp: Breakpoint = { id: "bp-status", kind: "status", enabled: true, value: "error" };
+      assert.equal(matchesBreakpoint(events[3], bp), true);
+      assert.equal(matchesBreakpoint(events[0], bp), false);
+    });
+
+    it("matches stage breakpoint", () => {
+      const bp: Breakpoint = { id: "bp-stage", kind: "stage", enabled: true, value: "validate" };
+      assert.equal(matchesBreakpoint(events[3], bp), true);
+      assert.equal(matchesBreakpoint(events[1], bp), false);
+    });
+
+    it("matches record index breakpoint", () => {
+      const bp: Breakpoint = { id: "bp-rec", kind: "record", enabled: true, value: 1 };
+      assert.equal(matchesBreakpoint(events[2], bp), true);
+      assert.equal(matchesBreakpoint(events[3], bp), true);
+      assert.equal(matchesBreakpoint(events[0], bp), false);
+    });
+
+    it("matches rule breakpoint", () => {
+      const bp: Breakpoint = { id: "bp-rule", kind: "rule", enabled: true, value: "rule-gender" };
+      assert.equal(matchesBreakpoint(events[1], bp), true);
+      assert.equal(matchesBreakpoint(events[2], bp), false);
+    });
+
+    it("matches condition breakpoint on payload snippet", () => {
+      const bp: Breakpoint = {
+        id: "bp-cond",
+        kind: "condition",
+        enabled: true,
+        value: "",
+        conditionTarget: "input",
+        conditionPath: "patient.birthDate",
+        conditionOp: "equals",
+        conditionValue: "1980-05-12",
+      };
+      assert.equal(matchesBreakpoint(events[2], bp), true);
+      assert.equal(matchesBreakpoint(events[0], bp), false);
+    });
+
+    it("ignores disabled breakpoints", () => {
+      const bp: Breakpoint = { id: "bp-disabled", kind: "seq", enabled: false, value: 3 };
+      assert.equal(matchesBreakpoint(events[2], bp), false);
+    });
+  });
+
+  describe("findNextBreakpoint", () => {
+    const bps: Breakpoint[] = [
+      { id: "bp-err", kind: "status", enabled: true, value: "error" },
+      { id: "bp-rule", kind: "rule", enabled: true, value: "rule-gender" },
+    ];
+
+    it("finds next breakpoint forward", () => {
+      // events[1] is rule-gender, events[3] is error
+      assert.equal(findNextBreakpoint(events, 0, bps, "forward"), 1);
+      assert.equal(findNextBreakpoint(events, 1, bps, "forward"), 3);
+      assert.equal(findNextBreakpoint(events, 3, bps, "forward"), -1);
+    });
+
+    it("finds next breakpoint backward", () => {
+      assert.equal(findNextBreakpoint(events, 4, bps, "backward"), 3);
+      assert.equal(findNextBreakpoint(events, 3, bps, "backward"), 1);
+      assert.equal(findNextBreakpoint(events, 1, bps, "backward"), -1);
+    });
+  });
+
+  describe("findNextErrorIndex", () => {
+    it("jumps to errors or issue-bearing events forward and backward", () => {
+      // events[2] has warning issue, events[3] has error status and error issue
+      assert.equal(findNextErrorIndex(events, 0, "forward"), 2);
+      assert.equal(findNextErrorIndex(events, 2, "forward"), 3);
+      assert.equal(findNextErrorIndex(events, 3, "forward"), -1);
+
+      assert.equal(findNextErrorIndex(events, 4, "backward"), 3);
+      assert.equal(findNextErrorIndex(events, 3, "backward"), 2);
+      assert.equal(findNextErrorIndex(events, 2, "backward"), -1);
+    });
+  });
+
+  describe("findNextRecordIndex", () => {
+    it("jumps to the next distinct record index forward and backward", () => {
+      // seq 1: rec 0, seq 2: rec 0, seq 3: rec 1, seq 4: rec 1, seq 5: rec 2
+      assert.equal(findNextRecordIndex(events, 0, "forward"), 2); // jumps from rec 0 to rec 1 at index 2
+      assert.equal(findNextRecordIndex(events, 2, "forward"), 4); // jumps from rec 1 to rec 2 at index 4
+      assert.equal(findNextRecordIndex(events, 4, "forward"), -1);
+
+      assert.equal(findNextRecordIndex(events, 4, "backward"), 2); // jumps from rec 2 back to rec 1 at index 2
+      assert.equal(findNextRecordIndex(events, 2, "backward"), 0); // jumps from rec 1 back to rec 0 at index 0
+      assert.equal(findNextRecordIndex(events, 0, "backward"), -1);
+    });
+  });
+
+  describe("evaluateRuleConditions", () => {
+    it("evaluates when conditions against input snippet", () => {
+      const testRule = {
+        id: "rule-test",
+        sourcePath: "patient.birthDate",
+        targetPath: "Patient.birthDate",
+        transform: "identity",
+        when: [
+          { path: "patient.active", op: "equals", value: true },
+          { path: "patient.birthDate", op: "exists" },
+        ],
+      };
+
+      const results = evaluateRuleConditions(testRule, { patient: { birthDate: "1980-05-12", active: true } }, true);
+      assert.equal(results.length, 2);
+      assert.equal(results[0].matched, true);
+      assert.equal(results[0].observedValue, true);
+      assert.equal(results[1].matched, true);
+      assert.equal(results[1].hasObservedValue, true);
+    });
+
+    it("handles missing snippet safely", () => {
+      const testRule = {
+        id: "rule-test",
+        sourcePath: "patient.active",
+        targetPath: "Patient.active",
+        transform: "identity",
+        when: [{ path: "patient.active", op: "equals", value: true }],
+      };
+
+      const results = evaluateRuleConditions(testRule, null, false);
+      assert.equal(results.length, 1);
+      assert.equal(results[0].evaluated, false);
+      assert.equal(results[0].matched, false);
+      assert.equal(results[0].reason, "Snippet not recorded in trace event");
     });
   });
 });
