@@ -112,17 +112,19 @@ export class DebuggerStore {
     this.problemSignal.set(null);
     this.loadedRunId = runId;
 
+    let loadedBps: Breakpoint[] = [];
     try {
       if (typeof sessionStorage !== "undefined") {
         const cached = sessionStorage.getItem(`healthbridge:debugger:bp:${runId}`);
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed)) {
-            this.breakpointsSignal.set(parsed);
+            loadedBps = parsed;
           }
         }
       }
     } catch {}
+    this.breakpointsSignal.set(loadedBps);
 
     this.api.getRun(runId).subscribe({
       next: (run) => {
@@ -195,7 +197,7 @@ export class DebuggerStore {
 
   public toggleSeqBreakpoint(seq: number): void {
     const current = this.breakpointsSignal();
-    const existingIdx = current.findIndex((bp) => bp.kind === "seq" && bp.value === seq);
+    const existingIdx = current.findIndex((bp) => bp.kind === "seq" && Number(bp.value) === seq);
     let next: Breakpoint[];
     if (existingIdx >= 0) {
       next = current.filter((_, idx) => idx !== existingIdx);

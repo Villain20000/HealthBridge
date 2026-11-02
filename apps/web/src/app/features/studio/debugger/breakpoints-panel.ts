@@ -295,6 +295,12 @@ export class BreakpointsPanel {
     if (kind === "condition") {
       const path = this.newCondPath().trim();
       if (!path) return;
+      let condVal: any = this.newCondVal() || undefined;
+      if (condVal !== undefined && typeof condVal === "string") {
+        try {
+          condVal = JSON.parse(condVal);
+        } catch {}
+      }
       this.add.emit({
         kind: "condition",
         enabled: true,
@@ -302,11 +308,14 @@ export class BreakpointsPanel {
         conditionTarget: this.newCondTarget(),
         conditionPath: path,
         conditionOp: this.newCondOp(),
-        conditionValue: this.newCondVal() || undefined,
+        conditionValue: condVal,
       });
     } else {
       const rawVal = this.newValue().trim();
       if (!rawVal) return;
+      if ((kind === "seq" || kind === "record") && (!Number.isInteger(Number(rawVal)) || Number(rawVal) < 0)) {
+        return;
+      }
       const value = kind === "seq" || kind === "record" ? Number(rawVal) : rawVal;
       this.add.emit({
         kind,

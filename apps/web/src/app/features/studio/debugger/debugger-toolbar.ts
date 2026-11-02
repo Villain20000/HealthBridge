@@ -11,7 +11,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from "@an
           type="button"
           class="small primary-step"
           (click)="continue.emit()"
-          [disabled]="!canNext() && !hasBreakpoints()"
+          [disabled]="!hasBreakpoints() || !canNext()"
           title="Continue to next breakpoint (F5)"
         >
           <span class="icon" aria-hidden="true">▶</span>

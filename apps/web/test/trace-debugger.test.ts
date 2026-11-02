@@ -696,6 +696,7 @@ describe("breakpoints.logic", () => {
   describe("findNextRecordIndex", () => {
     it("jumps to the next distinct record index forward and backward", () => {
       // seq 1: rec 0, seq 2: rec 0, seq 3: rec 1, seq 4: rec 1, seq 5: rec 2
+      assert.equal(findNextRecordIndex(events, -1, "forward"), 0); // jumps to first record event from unselected state
       assert.equal(findNextRecordIndex(events, 0, "forward"), 2); // jumps from rec 0 to rec 1 at index 2
       assert.equal(findNextRecordIndex(events, 2, "forward"), 4); // jumps from rec 1 to rec 2 at index 4
       assert.equal(findNextRecordIndex(events, 4, "forward"), -1);
@@ -703,6 +704,7 @@ describe("breakpoints.logic", () => {
       assert.equal(findNextRecordIndex(events, 4, "backward"), 2); // jumps from rec 2 back to rec 1 at index 2
       assert.equal(findNextRecordIndex(events, 2, "backward"), 0); // jumps from rec 1 back to rec 0 at index 0
       assert.equal(findNextRecordIndex(events, 0, "backward"), -1);
+      assert.equal(findNextRecordIndex(events, -1, "backward"), -1);
     });
   });
 

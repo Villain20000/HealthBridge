@@ -9,7 +9,7 @@ import { DebuggerToolbar } from "./debugger-toolbar";
     <hb-debugger-toolbar
       [canPrevious]="canPrev"
       [canNext]="canNext"
-      [hasBreakpoints]="true"
+      [hasBreakpoints]="hasBps"
       [currentIndex]="currentIndex"
       [totalCount]="totalCount"
       [offFilterNotice]="notice"
@@ -24,6 +24,7 @@ import { DebuggerToolbar } from "./debugger-toolbar";
 class TestHost {
   canPrev = true;
   canNext = true;
+  hasBps = true;
   currentIndex = 2;
   totalCount = 10;
   notice: { seq: number; label: string } | null = null;
@@ -90,5 +91,15 @@ describe("DebuggerToolbar", () => {
     const jumpBtn = alert?.querySelector("button");
     jumpBtn?.click();
     expect(fixture.componentInstance.jumpedOffFilter).toBe(true);
+  });
+
+  it("disables continue button when hasBreakpoints is false", () => {
+    const fixture = TestBed.createComponent(TestHost);
+    fixture.componentInstance.hasBps = false;
+    fixture.detectChanges();
+
+    const element = fixture.nativeElement as HTMLElement;
+    const continueBtn = Array.from(element.querySelectorAll("button")).find((b) => b.textContent?.includes("Continue"));
+    expect(continueBtn?.disabled).toBe(true);
   });
 });

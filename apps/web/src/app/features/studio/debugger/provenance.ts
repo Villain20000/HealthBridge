@@ -46,95 +46,66 @@ const JOIN_TONES: Record<RuleJoinStatus, "ok" | "info" | "warn" | "muted"> = {
         }
       </div>
 
-      <p class="subtle">
-        Payload values are <strong>[observed]</strong> from the stored trace; rules and condition definitions are
-        <strong>[inferred]</strong> from the mapping specification.
-      </p>
+      <p class="subtle">Declared from the run's mapping version. The trace does not record per-rule observed values.</p>
 
       @if (join().rule; as rule) {
         <dl class="kv">
-          <dt>Rule ID</dt>
-          <dd class="mono">
-            {{ rule.id }}
-            @if (event().ruleId) {
-              <span class="badge-tag observed">[observed]</span>
-            } @else {
-              <span class="badge-tag inferred">[inferred]</span>
-            }
-          </dd>
           <dt>Source path</dt>
-          <dd class="mono">
-            {{ rule.sourcePath }}
-            <span class="badge-tag inferred">[inferred]</span>
-          </dd>
+          <dd class="mono">{{ rule.sourcePath }}</dd>
           <dt>Target path</dt>
-          <dd class="mono">
-            {{ rule.targetPath }}
-            @if (event().targetPath) {
-              <span class="badge-tag observed">[observed]</span>
-            } @else {
-              <span class="badge-tag inferred">[inferred]</span>
-            }
-          </dd>
+          <dd class="mono">{{ rule.targetPath }}</dd>
           <dt>Transform</dt>
-          <dd class="mono">
-            {{ rule.transform }}
-            <span class="badge-tag inferred">[inferred]</span>
-          </dd>
+          <dd class="mono">{{ rule.transform }}</dd>
           <dt>Required</dt>
+          <dd>{{ rule.required === true ? "yes" : "no" }}</dd>
+          <dt>Conditions</dt>
           <dd>
-            {{ rule.required === true ? "yes" : "no" }}
-            <span class="badge-tag inferred">[inferred]</span>
+            @if (conditionResults().length > 0) {
+              <div class="table-wrap">
+                <table class="condition-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Condition</th>
+                      <th scope="col">Observed in Input</th>
+                      <th scope="col">Outcome</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (res of conditionResults(); track res.path + res.op + $index) {
+                      <tr>
+                        <td class="mono">
+                          {{ res.path }} {{ res.op }}
+                          @if (res.expectedValue !== undefined) {
+                            <span> {{ res.expectedValue | json }}</span>
+                          }
+                        </td>
+                        <td>
+                          @if (res.hasObservedValue) {
+                            <span class="mono">{{ res.observedValue | json }}</span>
+                            <span class="badge-tag observed">[observed]</span>
+                          } @else {
+                            <span class="subtle">not in snippet</span>
+                          }
+                        </td>
+                        <td>
+                          @if (!res.evaluated) {
+                            <span class="chip muted">Unavailable</span>
+                          } @else if (res.matched) {
+                            <span class="chip ok">Matched</span>
+                          } @else {
+                            <span class="chip warn">Not matched</span>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            } @else {
+              None
+            }
           </dd>
         </dl>
-
-        <section class="conditions-section">
-          <h4>Rule Conditions</h4>
-          @if (conditionResults().length > 0) {
-            <div class="table-wrap">
-              <table class="condition-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Condition</th>
-                    <th scope="col">Observed in Input</th>
-                    <th scope="col">Outcome</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (res of conditionResults(); track res.path + res.op) {
-                    <tr>
-                      <td class="mono">
-                        {{ res.path }} {{ res.op }}
-                        @if (res.expectedValue !== undefined) {
-                          <span> {{ res.expectedValue | json }}</span>
-                        }
-                      </td>
-                      <td>
-                        @if (res.hasObservedValue) {
-                          <span class="mono">{{ res.observedValue | json }}</span>
-                          <span class="badge-tag observed">[observed]</span>
-                        } @else {
-                          <span class="subtle">not in snippet</span>
-                        }
-                      </td>
-                      <td>
-                        @if (!res.evaluated) {
-                          <span class="chip muted">Unavailable</span>
-                        } @else if (res.matched) {
-                          <span class="chip ok">Matched</span>
-                        } @else {
-                          <span class="chip warn">Not matched</span>
-                        }
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          } @else {
-            <p class="subtle">No conditions declared on this rule (unconditional).</p>
-          }
-        </section>
       } @else {
         <p class="subtle">{{ join().note }}</p>
       }
@@ -200,6 +171,7 @@ const JOIN_TONES: Record<RuleJoinStatus, "ok" | "info" | "warn" | "muted"> = {
     .condition-table {
       width: 100%;
       font-size: 12px;
+      margin-top: 4px;
     }
 
     .condition-table th, .condition-table td {

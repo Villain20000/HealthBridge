@@ -168,7 +168,19 @@ export function findNextRecordIndex(
   currentIndex: number,
   direction: "forward" | "backward",
 ): number {
-  if (events.length === 0 || currentIndex < 0 || currentIndex >= events.length) return -1;
+  if (events.length === 0 || currentIndex >= events.length) return -1;
+  if (currentIndex < 0) {
+    if (direction === "forward") {
+      let idx = 0;
+      while (idx < events.length) {
+        if (events[idx].recordIndex !== null) {
+          return idx;
+        }
+        idx += 1;
+      }
+    }
+    return -1;
+  }
 
   const currentRecord = events[currentIndex].recordIndex;
   if (direction === "forward") {

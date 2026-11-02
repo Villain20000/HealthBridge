@@ -1,4 +1,5 @@
 import { TestBed } from "@angular/core/testing";
+import { of } from "rxjs";
 import { ApiClient } from "../../../core/api-client";
 import { DebuggerStore } from "./debugger.store";
 
@@ -12,10 +13,10 @@ describe("DebuggerStore breakpoints & stepping", () => {
         {
           provide: ApiClient,
           useValue: {
-            getRun: () => {},
-            getRunTraces: () => {},
-            getRunIssues: () => {},
-            getMapping: () => {},
+            getRun: () => of({ id: "run-1", mappingId: "m-1" }),
+            getRunTraces: () => of({ traces: [] }),
+            getRunIssues: () => of({ issues: [] }),
+            getMapping: () => of({ id: "m-1", rules: [] }),
           },
         },
       ],
@@ -54,6 +55,31 @@ describe("DebuggerStore breakpoints & stepping", () => {
     expect(store.breakpoints()[0].enabled).toBe(false);
 
     store.removeBreakpoint(id);
+    expect(store.breakpoints().length).toBe(0);
+  });
+
+  it("toggles off sequence breakpoint even if value was stored as a string", () => {
+    store.addBreakpoint({
+      kind: "seq",
+      enabled: true,
+      value: "42" as any,
+    });
+    expect(store.breakpoints().length).toBe(1);
+    expect(store.breakpointSeqs().has(42)).toBe(true);
+
+    store.toggleSeqBreakpoint(42);
+    expect(store.breakpoints().length).toBe(0);
+    expect(store.breakpointSeqs().has(42)).toBe(false);
+  });
+
+  it("resets breakpoints on load when switching to a run without cached breakpoints", () => {
+    sessionStorage.setItem("healthbridge:debugger:bp:run-1", JSON.stringify([{ id: "bp-1", kind: "seq", enabled: true, value: 1 }]));
+    sessionStorage.removeItem("healthbridge:debugger:bp:run-2");
+
+    store.load("run-1");
+    expect(store.breakpoints().length).toBe(1);
+
+    store.load("run-2");
     expect(store.breakpoints().length).toBe(0);
   });
 });

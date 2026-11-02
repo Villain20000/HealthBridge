@@ -59,4 +59,25 @@ describe("BreakpointsPanel", () => {
     deleteBtn.click();
     expect(fixture.componentInstance.removed).toBe("bp-1");
   });
+
+  it("does not emit add when seq or record value is non-numeric", () => {
+    const fixture = TestBed.createComponent(TestHost);
+    fixture.detectChanges();
+
+    const panel = fixture.debugElement.children[0].componentInstance as BreakpointsPanel;
+    panel.showAddForm.set(true);
+    panel.newKind.set("seq");
+    panel.newValue.set("abc");
+
+    panel.onAddSubmit();
+    expect(fixture.componentInstance.added).toBeNull();
+
+    panel.newValue.set("42");
+    panel.onAddSubmit();
+    expect(fixture.componentInstance.added).toEqual({
+      kind: "seq",
+      enabled: true,
+      value: 42,
+    });
+  });
 });
