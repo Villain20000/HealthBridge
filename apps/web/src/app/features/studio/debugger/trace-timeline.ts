@@ -82,6 +82,15 @@ interface TimelineRow {
                 [attr.aria-setsize]="events().length"
                 (click)="selectSeq.emit(row.event.seq)"
               >
+                <button
+                  type="button"
+                  class="gutter-dot"
+                  [class.active]="hasBreakpoint(row.event.seq)"
+                  [attr.aria-label]="hasBreakpoint(row.event.seq) ? 'Remove breakpoint on event ' + row.event.seq : 'Add breakpoint on event ' + row.event.seq"
+                  (click)="onGutterClick($event, row.event.seq)"
+                >
+                  <span class="dot" aria-hidden="true">●</span>
+                </button>
                 <span class="seq">{{ row.event.seq }}</span>
                 <span class="stage">{{ row.event.stage }}</span>
                 <span class="step">{{ row.event.stepName || "not recorded" }}</span>
@@ -144,6 +153,37 @@ interface TimelineRow {
       background: var(--accent-soft);
     }
 
+    .gutter-dot {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      width: 18px;
+      height: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: transparent;
+      font-size: 13px;
+      line-height: 1;
+      border-radius: 50%;
+      flex: none;
+    }
+
+    .row:hover .gutter-dot {
+      color: var(--danger-subtle, rgba(220, 38, 38, 0.35));
+    }
+
+    .gutter-dot.active {
+      color: var(--danger, #dc2626) !important;
+    }
+
+    .gutter-dot:focus-visible {
+      outline: none;
+      box-shadow: var(--focus);
+    }
+
     .seq {
       flex: none;
       width: 48px;
@@ -179,7 +219,18 @@ interface TimelineRow {
 export class TraceTimeline {
   public readonly events = input.required<DebuggerEvent[]>();
   public readonly selectedSeq = input<number | null>(null);
+  public readonly breakpointSeqs = input<Set<number>>(new Set<number>());
   public readonly selectSeq = output<number>();
+  public readonly toggleBreakpoint = output<number>();
+
+  protected hasBreakpoint(seq: number): boolean {
+    return this.breakpointSeqs().has(seq);
+  }
+
+  protected onGutterClick(event: MouseEvent, seq: number): void {
+    event.stopPropagation();
+    this.toggleBreakpoint.emit(seq);
+  }
 
   private readonly scroller = viewChild<ElementRef<HTMLElement>>("scroller");
   private readonly scrollTop = signal(0);
