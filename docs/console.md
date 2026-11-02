@@ -22,7 +22,7 @@ authentication system. Read the security model before exposing it anywhere.
 | Live progress | Yes | `fetch` + `ReadableStream` SSE, reconnect with `Last-Event-ID`, connection chip |
 | Studio | Yes | Landing screen with the latest five runs, assets and mappings, per-run stored-trace debugger links, and the mapping editor (draft autosave, conflict handling, publish, version diff, preview) |
 | Mapping editor | Yes | `/studio/mappings/:name`: draft autosave and undo/redo, conflict resolution, publish with a server-validation gate, draft discard, read-only published versions, server version diff, JSON import/export, conditions and every transform parameter, coverage heat map, bounded preview |
-| Stored-trace debugger | Yes | Filters, stage summary, virtualised timeline, payloads, declared rule provenance, resource/snippet diffs, filtered JSON export; reads stored rows only — no live attach, SSE, polling or breakpoints |
+| Stored-trace debugger | Yes | Three-pane workbench, breakpoint management (gutter toggles, status/stage/record/rule/condition), multi-mode stepping (Continue, Step Over, Step Back, Jump Error/Record), rule condition evaluation with [observed] vs [inferred] badges, resource/snippet diffs, filtered JSON export; reads stored rows only — no live attach |
 | Assets | Yes | Upload (size limit read from the API), list, download link, checksum display |
 | Mappings | Yes | Import spec, versions, inspect the stored spec |
 | Pipelines | Yes | Create (mapping + engine config), list, run against an asset → the run it produced |

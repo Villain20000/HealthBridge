@@ -1009,4 +1009,46 @@ test.describe("stored-trace debugger · 5,000-event fixture", () => {
     await expect(page.getByRole("group", { name: "Trace filters" })).toHaveCount(0);
     expect(requested.filter((path) => path.endsWith("/events"))).toEqual([]);
   });
+
+  test("debugger extensions: gutter toggles breakpoints, toolbar steps and jumps to error", async ({
+    console: page,
+  }) => {
+    await registerFixtureRoutes(page, FIXTURE_RUN_ID, "completed", FIXTURE_TRACES);
+    await openDebugger(page, FIXTURE_RUN_ID);
+
+    const toolbar = page.getByRole("toolbar", { name: "Debugger execution controls" });
+    await expect(toolbar).toBeVisible();
+
+    // Verify Three-Pane Workbench structure
+    await expect(page.locator(".debugger-three-pane")).toBeVisible();
+    await expect(page.locator(".left-pane")).toBeVisible();
+    await expect(page.locator(".center-pane")).toBeVisible();
+    await expect(page.locator(".right-pane")).toBeVisible();
+
+    // Click gutter on row 2 to set a breakpoint
+    const row2Gutter = page.locator("#hb-trace-option-2 .gutter-dot");
+    await expect(row2Gutter).toBeVisible();
+    await row2Gutter.click();
+    await expect(row2Gutter).toHaveClass(/active/);
+
+    // Verify breakpoint appears in Breakpoints panel
+    const bpPanel = page.locator("hb-breakpoints-panel");
+    await expect(bpPanel.getByText("Event #2")).toBeVisible();
+
+    // Click Continue in toolbar -> should advance to event 2
+    await toolbar.getByRole("button", { name: /Continue/i }).click();
+    await expect(page.locator("#hb-trace-option-2")).toHaveAttribute("aria-selected", "true");
+
+    // Click Step Over -> should advance to event 3
+    await toolbar.getByRole("button", { name: /Step Over/i }).click();
+    await expect(page.locator("#hb-trace-option-3")).toHaveAttribute("aria-selected", "true");
+
+    // Click Step Back -> should return to event 2
+    await toolbar.getByRole("button", { name: /Step Back/i }).click();
+    await expect(page.locator("#hb-trace-option-2")).toHaveAttribute("aria-selected", "true");
+
+    // Click Next Error
+    await toolbar.getByRole("button", { name: /Next Error/i }).click();
+    await expect(page.getByRole("heading", { level: 2, name: /Event 5/i })).toBeVisible();
+  });
 });

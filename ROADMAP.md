@@ -70,19 +70,20 @@ real limitation for a platform that wants to claim horizontal scaling.
 
 ---
 
-## Phase D — Studio and debugger — 🟨 (Operator Console v1 shipped)
+## Phase D — Studio and debugger — ✅ (Studio and debugger extensions shipped)
 
 **Done:** Angular 19 Operator Console (standalone components, signals, lazy routes) —
 connect, health/limits, dashboard on real metrics, runs (cursor pagination, submit, cancel,
 replay), run detail (issues, resources, traces, bundle), SSE live progress through the
 proxy, asset upload, mappings, API keys, audit log, dark/light themes, axe checks and
-Playwright journeys against the API and the Docker Compose stack. See
+Playwright journeys against the API and the Docker Compose stack. Studio tools:
+rule-table mapping editor, read-only schema explorers, lineage view, validation centre,
+`GET /assets/:id/schema`, and VS Code-style three-pane debugger workbench over stored traces
+with breakpoint management, multi-mode stepping (Continue, Step Over, Step Back, Jump Error/Record),
+and rule condition evaluation ([observed] vs [inferred] labeling). See
 [docs/console.md](docs/console.md).
 
-**Still open:** VS Code-style three-pane debugger extensions over stored traces · pipeline runs in the UI · cookie-based BFF/OIDC.
-
-**Shipped:** rule-table mapping editor, read-only schema explorers, lineage view, validation centre, `GET /assets/:id/schema`.
-
+**Still open:** cookie-based BFF/OIDC (D4).
 
 Static trace replay must not be labelled as live execution (standing rule); live pausable execution shipped (see Phase G below).
 
