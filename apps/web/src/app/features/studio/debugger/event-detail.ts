@@ -1,7 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from "@angular/core";
 import { formatDateTime, formatDuration } from "../../../core/format";
 import { JsonTree } from "../../../ui/json-tree";
-import { Provenance } from "./provenance";
 import { statusTone } from "./trace-timeline";
 import type { DebuggerEvent } from "./trace.logic";
 
@@ -12,7 +11,7 @@ import type { DebuggerEvent } from "./trace.logic";
 @Component({
   selector: "hb-event-detail",
   standalone: true,
-  imports: [JsonTree, Provenance],
+  imports: [JsonTree],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section aria-labelledby="dbg-event-heading">
@@ -103,8 +102,6 @@ import type { DebuggerEvent } from "./trace.logic";
       } @else {
         <p class="subtle">No issues recorded on this event.</p>
       }
-
-      <hb-provenance [event]="event()" [mappingSpec]="mappingSpec()" />
     </section>
   `,
   styles: `
