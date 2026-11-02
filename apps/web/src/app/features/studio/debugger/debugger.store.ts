@@ -21,6 +21,12 @@ import type {
   TraceAvailability,
   TraceExport,
 } from "./trace.logic";
+import {
+  findNextBreakpoint,
+  findNextErrorIndex,
+  findNextRecordIndex,
+} from "./breakpoints.logic";
+import type { Breakpoint } from "./breakpoints.logic";
 
 /**
  * Page-scoped store for the stored-trace debugger.
@@ -44,6 +50,9 @@ export class DebuggerStore {
   private readonly problemSignal = signal<ApiProblem | null>(null);
   private readonly selectedSeqSignal = signal<number | null>(null);
 
+  private readonly breakpointsSignal = signal<Breakpoint[]>([]);
+  private readonly offFilterNoticeSignal = signal<{ seq: number; label: string } | null>(null);
+
   private requestToken = 0;
   private loadedRunId: string | null = null;
 
@@ -55,6 +64,20 @@ export class DebuggerStore {
   public readonly loading: Signal<boolean> = this.loadingSignal.asReadonly();
   public readonly problem: Signal<ApiProblem | null> = this.problemSignal.asReadonly();
   public readonly selectedSeq: Signal<number | null> = this.selectedSeqSignal.asReadonly();
+
+  public readonly breakpoints: Signal<Breakpoint[]> = this.breakpointsSignal.asReadonly();
+  public readonly offFilterNotice: Signal<{ seq: number; label: string } | null> =
+    this.offFilterNoticeSignal.asReadonly();
+
+  public readonly breakpointSeqs: Signal<Set<number>> = computed(() => {
+    const set = new Set<number>();
+    for (const bp of this.breakpointsSignal()) {
+      if (bp.enabled && bp.kind === "seq") {
+        set.add(Number(bp.value));
+      }
+    }
+    return set;
+  });
 
   public readonly selected: Signal<DebuggerEvent | null> = computed(() => {
     const seq = this.selectedSeqSignal();
@@ -87,6 +110,19 @@ export class DebuggerStore {
     const token = ++this.requestToken;
     this.loadingSignal.set(true);
     this.problemSignal.set(null);
+    this.loadedRunId = runId;
+
+    try {
+      if (typeof sessionStorage !== "undefined") {
+        const cached = sessionStorage.getItem(`healthbridge:debugger:bp:${runId}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            this.breakpointsSignal.set(parsed);
+          }
+        }
+      }
+    } catch {}
 
     this.api.getRun(runId).subscribe({
       next: (run) => {
@@ -106,7 +142,6 @@ export class DebuggerStore {
             this.mappingSignal.set(result.mapping);
             this.eventsSignal.set(events);
             this.issuesSignal.set(result.issues.issues);
-            this.loadedRunId = runId;
             this.selectDefault(events);
             this.loadingSignal.set(false);
           },
@@ -148,6 +183,193 @@ export class DebuggerStore {
         this.loadingSignal.set(false);
       },
     });
+  }
+
+  private persistBreakpoints(bps: Breakpoint[]): void {
+    if (this.loadedRunId && typeof sessionStorage !== "undefined") {
+      try {
+        sessionStorage.setItem(`healthbridge:debugger:bp:${this.loadedRunId}`, JSON.stringify(bps));
+      } catch {}
+    }
+  }
+
+  public toggleSeqBreakpoint(seq: number): void {
+    const current = this.breakpointsSignal();
+    const existingIdx = current.findIndex((bp) => bp.kind === "seq" && bp.value === seq);
+    let next: Breakpoint[];
+    if (existingIdx >= 0) {
+      next = current.filter((_, idx) => idx !== existingIdx);
+    } else {
+      const newBp: Breakpoint = {
+        id: `bp-seq-${seq}-${Date.now().toString(36)}`,
+        kind: "seq",
+        enabled: true,
+        value: seq,
+      };
+      next = [...current, newBp];
+    }
+    this.breakpointsSignal.set(next);
+    this.persistBreakpoints(next);
+  }
+
+  public addBreakpoint(bp: Omit<Breakpoint, "id">): void {
+    const newBp: Breakpoint = {
+      ...bp,
+      id: `bp-${bp.kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    };
+    const next = [...this.breakpointsSignal(), newBp];
+    this.breakpointsSignal.set(next);
+    this.persistBreakpoints(next);
+  }
+
+  public removeBreakpoint(id: string): void {
+    const next = this.breakpointsSignal().filter((bp) => bp.id !== id);
+    this.breakpointsSignal.set(next);
+    this.persistBreakpoints(next);
+  }
+
+  public toggleBreakpoint(id: string): void {
+    const next = this.breakpointsSignal().map((bp) => (bp.id === id ? { ...bp, enabled: !bp.enabled } : bp));
+    this.breakpointsSignal.set(next);
+    this.persistBreakpoints(next);
+  }
+
+  public stepOver(): void {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const idx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+    if (idx >= 0 && idx < visible.length - 1) {
+      this.selectIndex(idx + 1);
+    } else if (idx === -1 && visible.length > 0) {
+      this.selectIndex(0);
+    }
+  }
+
+  public stepBack(): void {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const idx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+    if (idx > 0) {
+      this.selectIndex(idx - 1);
+    }
+  }
+
+  public continueToBreakpoint(): boolean {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const currentVisibleIdx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+
+    const nextVisibleIdx = findNextBreakpoint(visible, currentVisibleIdx, this.breakpointsSignal(), "forward");
+    if (nextVisibleIdx >= 0) {
+      this.selectIndex(nextVisibleIdx);
+      return true;
+    }
+
+    const all = this.eventsSignal();
+    const currentAllIdx = selected === null ? -1 : all.findIndex((e) => e.seq === selected);
+    const nextAllIdx = findNextBreakpoint(all, currentAllIdx, this.breakpointsSignal(), "forward");
+    if (nextAllIdx >= 0) {
+      const match = all[nextAllIdx];
+      this.offFilterNoticeSignal.set({
+        seq: match.seq,
+        label: `Breakpoint match at event #${match.seq} (${match.stage}) is hidden by current filters.`,
+      });
+    }
+    return false;
+  }
+
+  public jumpToNextError(): boolean {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const currentVisibleIdx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+
+    const nextVisibleIdx = findNextErrorIndex(visible, currentVisibleIdx, "forward");
+    if (nextVisibleIdx >= 0) {
+      this.selectIndex(nextVisibleIdx);
+      return true;
+    }
+
+    const all = this.eventsSignal();
+    const currentAllIdx = selected === null ? -1 : all.findIndex((e) => e.seq === selected);
+    const nextAllIdx = findNextErrorIndex(all, currentAllIdx, "forward");
+    if (nextAllIdx >= 0) {
+      const match = all[nextAllIdx];
+      this.offFilterNoticeSignal.set({
+        seq: match.seq,
+        label: `Next error at event #${match.seq} (${match.stage}) is hidden by current filters.`,
+      });
+    }
+    return false;
+  }
+
+  public jumpToPrevError(): boolean {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const currentVisibleIdx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+
+    const nextVisibleIdx = findNextErrorIndex(visible, currentVisibleIdx, "backward");
+    if (nextVisibleIdx >= 0) {
+      this.selectIndex(nextVisibleIdx);
+      return true;
+    }
+
+    const all = this.eventsSignal();
+    const currentAllIdx = selected === null ? -1 : all.findIndex((e) => e.seq === selected);
+    const nextAllIdx = findNextErrorIndex(all, currentAllIdx, "backward");
+    if (nextAllIdx >= 0) {
+      const match = all[nextAllIdx];
+      this.offFilterNoticeSignal.set({
+        seq: match.seq,
+        label: `Previous error at event #${match.seq} (${match.stage}) is hidden by current filters.`,
+      });
+    }
+    return false;
+  }
+
+  public jumpToNextRecord(): boolean {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const currentVisibleIdx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+
+    const nextVisibleIdx = findNextRecordIndex(visible, currentVisibleIdx, "forward");
+    if (nextVisibleIdx >= 0) {
+      this.selectIndex(nextVisibleIdx);
+      return true;
+    }
+    return false;
+  }
+
+  public jumpToPrevRecord(): boolean {
+    this.clearOffFilterNotice();
+    const visible = this.filtered();
+    const selected = this.selectedSeqSignal();
+    const currentVisibleIdx = selected === null ? -1 : visible.findIndex((e) => e.seq === selected);
+
+    const nextVisibleIdx = findNextRecordIndex(visible, currentVisibleIdx, "backward");
+    if (nextVisibleIdx >= 0) {
+      this.selectIndex(nextVisibleIdx);
+      return true;
+    }
+    return false;
+  }
+
+  public jumpToOffFilterMatch(): void {
+    const notice = this.offFilterNoticeSignal();
+    if (notice) {
+      this.clearFilter();
+      this.selectSeq(notice.seq);
+      this.clearOffFilterNotice();
+    }
+  }
+
+  public clearOffFilterNotice(): void {
+    this.offFilterNoticeSignal.set(null);
   }
 
   /**
