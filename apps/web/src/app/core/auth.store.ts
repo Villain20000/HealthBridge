@@ -24,6 +24,11 @@ export interface ConnectionState {
   failureDetail: string | null;
 }
 
+export function normalizeBaseUrl(raw: string): string {
+  const trimmed = (raw || "").trim().replace(/\/+$/, "");
+  return trimmed || "/api/v1";
+}
+
 const DEFAULT_STATE: ConnectionState = {
   connected: false,
   baseUrl: "/api/v1",
@@ -40,6 +45,7 @@ export class AuthStore {
 
   public readonly apiKey = this.apiKeySignal.asReadonly();
   public readonly state = this.stateSignal.asReadonly();
+  public readonly baseUrl = computed(() => this.stateSignal().baseUrl || "/api/v1");
   public readonly isConnected = computed(() => this.stateSignal().connected);
   public readonly inFlight = computed(() => this.inFlightSignal());
   public readonly keyPrefix = computed(() => this.stateSignal().keyPrefix ?? "");
@@ -48,14 +54,20 @@ export class AuthStore {
   /** Called by the connect screen only after `GET /healthz` + `GET /workspaces/current` succeeded. */
   public connect(apiKey: string, baseUrl = DEFAULT_STATE.baseUrl): void {
     const trimmed = apiKey.trim();
+    const normalized = normalizeBaseUrl(baseUrl);
     this.apiKeySignal.set(trimmed);
     this.stateSignal.set({
       connected: true,
-      baseUrl,
+      baseUrl: normalized,
       keyPrefix: maskKey(trimmed),
       failure: null,
       failureDetail: null,
     });
+  }
+
+  public setBaseUrl(baseUrl: string): void {
+    const normalized = normalizeBaseUrl(baseUrl);
+    this.stateSignal.update((state) => ({ ...state, baseUrl: normalized }));
   }
 
   public disconnect(): void {

@@ -5,7 +5,7 @@ import { ApiClient } from "../../core/api-client";
 import { AuthStore } from "../../core/auth.store";
 import { describeProblem } from "../../core/api-errors";
 import { safeReturnUrl } from "../../core/navigation";
-import type { ApiProblem } from "../../core/api-types";
+import type { ApiProblem, Health } from "../../core/api-types";
 import { ErrorPanel } from "../../ui/primitives";
 
 /**
@@ -31,6 +31,31 @@ import { ErrorPanel } from "../../ui/primitives";
       </div>
     </div>
 
+    @if (apiHealth(); as h) {
+      <div class="banner" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px">
+        <div>
+          <strong style="color: var(--ok)">● API is reachable</strong>
+          <span class="subtle"> · mode: {{ h.mode }} · uptime: {{ h.uptimeSeconds }}s · persistence: {{ h.persistence }}</span>
+        </div>
+        <button
+          type="button"
+          class="small primary"
+          (click)="quickDemoConnect()"
+          [disabled]="quickConnectBusy() || busy()"
+        >
+          {{ quickConnectBusy() ? "Connecting…" : "Quick Connect (Local Demo)" }}
+        </button>
+      </div>
+    } @else if (!checkingHealth()) {
+      <div class="banner" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px">
+        <div>
+          <strong style="color: var(--warn)">○ API not detected at <code>{{ baseUrl }}</code></strong>
+          <span class="subtle"> — Ensure the API server is running or verify your API base URL.</span>
+        </div>
+        <button type="button" class="small ghost" (click)="checkHealth()">Recheck</button>
+      </div>
+    }
+
     <div class="grid cols-2">
       <section class="card" aria-labelledby="connect-heading">
         <h2 id="connect-heading">Connect with an API key</h2>
@@ -38,7 +63,14 @@ import { ErrorPanel } from "../../ui/primitives";
 
         <div class="field">
           <label for="base-url">API base URL</label>
-          <input id="base-url" name="baseUrl" [(ngModel)]="baseUrl" autocomplete="off" spellcheck="false" />
+          <input
+            id="base-url"
+            name="baseUrl"
+            [(ngModel)]="baseUrl"
+            (ngModelChange)="onBaseUrlChange()"
+            autocomplete="off"
+            spellcheck="false"
+          />
           <p class="help">Requests are proxied through this origin when it starts with <code>/</code>.</p>
         </div>
 
@@ -78,7 +110,10 @@ import { ErrorPanel } from "../../ui/primitives";
       </section>
 
       <section class="card" aria-labelledby="bootstrap-heading">
-        <h2 id="bootstrap-heading">First run? Create a workspace</h2>
+        <div class="row" style="justify-content: space-between; align-items: center">
+          <h2 id="bootstrap-heading">First run? Create a workspace</h2>
+          <button type="button" class="small ghost" (click)="fillDemoCredentials()">Use demo credentials</button>
+        </div>
         <p class="card-sub">
           Needs the server's <code>HEALTHBRIDGE_BOOTSTRAP_TOKEN</code>. The returned key is shown once — the console
           connects with it immediately and keeps it in memory.
@@ -140,6 +175,59 @@ export class ConnectPage {
   protected readonly problem = signal<ApiProblem | null>(null);
   protected readonly bootstrapBusy = signal(false);
   protected readonly bootstrapProblem = signal<ApiProblem | null>(null);
+  protected readonly apiHealth = signal<Health | null>(null);
+  protected readonly checkingHealth = signal(true);
+  protected readonly quickConnectBusy = signal(false);
+
+  constructor() {
+    this.checkHealth();
+  }
+
+  protected onBaseUrlChange(): void {
+    this.checkHealth();
+  }
+
+  protected checkHealth(): void {
+    this.checkingHealth.set(true);
+    const targetUrl = this.baseUrl.trim() || "/api/v1";
+    this.api.health(targetUrl).subscribe({
+      next: (h) => {
+        this.apiHealth.set(h);
+        this.checkingHealth.set(false);
+      },
+      error: () => {
+        this.apiHealth.set(null);
+        this.checkingHealth.set(false);
+      },
+    });
+  }
+
+  protected fillDemoCredentials(): void {
+    this.bootstrapToken = "demo-bootstrap-token";
+    this.workspaceName = "Demo Clinic";
+    this.workspaceSlug = `demo-${Date.now().toString(36)}`;
+  }
+
+  protected quickDemoConnect(): void {
+    this.quickConnectBusy.set(true);
+    this.problem.set(null);
+    const targetUrl = this.baseUrl.trim() || "/api/v1";
+    const slug = `demo-${Date.now().toString(36)}`;
+
+    this.api
+      .createWorkspace({ name: "Demo Clinic", slug }, "demo-bootstrap-token", targetUrl)
+      .subscribe({
+        next: (created) => {
+          this.quickConnectBusy.set(false);
+          this.auth.connect(created.apiKey.key, targetUrl);
+          void this.router.navigateByUrl(this.destination());
+        },
+        error: (err: unknown) => {
+          this.quickConnectBusy.set(false);
+          this.problem.set(err as ApiProblem);
+        },
+      });
+  }
 
   protected readonly previousFailure = computed(() => {
     const state = this.auth.state();
@@ -156,10 +244,11 @@ export class ConnectPage {
     this.busy.set(true);
     this.problem.set(null);
 
+    const targetUrl = this.baseUrl.trim() || "/api/v1";
     // healthz is public: it proves the URL before blaming the key.
-    this.api.health().subscribe({
+    this.api.health(targetUrl).subscribe({
       next: () => {
-        this.auth.connect(key, this.baseUrl.trim() || "/api/v1");
+        this.auth.connect(key, targetUrl);
         this.api.currentWorkspace().subscribe({
           next: () => {
             this.busy.set(false);
@@ -183,16 +272,18 @@ export class ConnectPage {
   protected bootstrap(): void {
     this.bootstrapBusy.set(true);
     this.bootstrapProblem.set(null);
+    const targetUrl = this.baseUrl.trim() || "/api/v1";
     this.api
       .createWorkspace(
         { name: this.workspaceName.trim() || "Clinic", slug: this.workspaceSlug.trim() },
         this.bootstrapToken,
+        targetUrl,
       )
       .subscribe({
         next: (created) => {
           this.bootstrapBusy.set(false);
           this.bootstrapToken = "";
-          this.auth.connect(created.apiKey.key, this.baseUrl.trim() || "/api/v1");
+          this.auth.connect(created.apiKey.key, targetUrl);
           void this.router.navigateByUrl(this.destination());
         },
         error: (error: unknown) => {

@@ -100,10 +100,11 @@ import { formatRelative } from "../../core/format";
                 <td class="num">v{{ mapping.version }}</td>
                 <td class="subtle">{{ mapping.sourceFormat }} → {{ mapping.targetFormat }}</td>
                 <td class="subtle">{{ relative(mapping.createdAt) }}</td>
-                <td class="right">
+                <td class="right" style="white-space: nowrap">
                   <button type="button" class="small" (click)="inspect(mapping)">Inspect</button>
                   <button type="button" class="small" (click)="history(mapping.name)">Versions</button>
-                  <a class="button small" [routerLink]="['/studio/mappings', mapping.name]">Open in Studio</a>
+                  <a class="button small" [routerLink]="['/mapping-editor', mapping.id]">Rules Editor</a>
+                  <a class="button small" [routerLink]="['/studio/mappings', mapping.name]">Studio</a>
                 </td>
               </tr>
             }

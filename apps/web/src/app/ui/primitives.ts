@@ -70,13 +70,16 @@ export class EmptyState {
     <div class="planned">
       <p class="tag">Planned</p>
       <h3>{{ title() }}</h3>
-      <p class="subtle">{{ message() }}</p>
+      <p class="subtle">{{ description() }}</p>
     </div>
   `,
 })
 export class PlannedCard {
   public readonly title = input.required<string>();
   public readonly message = input<string>("");
+  public readonly detail = input<string>("");
+
+  protected readonly description = computed(() => this.detail() || this.message());
 }
 
 @Component({

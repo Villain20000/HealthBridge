@@ -130,6 +130,7 @@ const FILTERS: Array<{ value: RunStatus | "all"; label: string }> = [
               <th class="num">Succeeded</th>
               <th class="num">Failed</th>
               <th>Created</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -143,6 +144,11 @@ const FILTERS: Array<{ value: RunStatus | "all"; label: string }> = [
                 <td class="num">{{ run.recordsSucceeded }}</td>
                 <td class="num">{{ run.recordsFailed }}</td>
                 <td class="subtle">{{ relative(run.createdAt) }}</td>
+                <td class="right" style="white-space: nowrap">
+                  <a class="button small" [routerLink]="['/runs', run.id]">Detail</a>
+                  <a class="button small" [routerLink]="['/validation-centre', run.id]">Validation</a>
+                  <a class="button small" [routerLink]="['/lineage', run.id]">Lineage</a>
+                </td>
               </tr>
             }
           </tbody>

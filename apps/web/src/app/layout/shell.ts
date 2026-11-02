@@ -51,6 +51,7 @@ import type { Health } from "../core/api-types";
             <span class="spinner" role="status" aria-label="Request in flight"></span>
           }
           @if (auth.isConnected()) {
+            <button type="button" class="small ghost" (click)="openFormats()" aria-haspopup="dialog">Formats</button>
             <span class="chip plain muted" [title]="'API key ' + auth.keyPrefix()">{{ auth.keyPrefix() }}</span>
             <button type="button" class="small ghost" (click)="disconnect()">Disconnect</button>
           }
@@ -63,6 +64,67 @@ import type { Health } from "../core/api-types";
       <main id="main" class="page" tabindex="-1">
         <router-outlet />
       </main>
+
+      @if (formatsOpen()) {
+        <div class="modal-backdrop" (click)="formatsOpen.set(false)" (keydown.escape)="formatsOpen.set(false)">
+          <div
+            class="modal-card card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="formats-title"
+            (click)="$event.stopPropagation()"
+            style="max-width: 820px; width: 92vw; max-height: 85vh; overflow-y: auto"
+          >
+            <div class="row" style="justify-content: space-between; align-items: center">
+              <h2 id="formats-title">Supported Adapters & Formats</h2>
+              <button type="button" class="small ghost" (click)="formatsOpen.set(false)" aria-label="Close dialog">
+                ✕
+              </button>
+            </div>
+            <p class="card-sub">
+              Live format adapters reported by <code>GET /api/v1/formats</code>.
+            </p>
+
+            @if (formatsLoading()) {
+              <p class="subtle" style="margin-top: 16px">Loading format adapters…</p>
+            } @else if (formatsList().length === 0) {
+              <p class="subtle" style="margin-top: 16px">No format adapters available.</p>
+            } @else {
+              <div class="table-wrap" style="margin-top: 16px">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Format</th>
+                      <th>Version</th>
+                      <th>Status</th>
+                      <th>Extensions</th>
+                      <th>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (fmt of formatsList(); track fmt.format) {
+                      <tr>
+                        <td class="mono"><strong>{{ fmt.format }}</strong></td>
+                        <td class="mono subtle">{{ fmt.version }}</td>
+                        <td>
+                          <span class="chip" [class.ok]="fmt.status === 'supported'" [class.warn]="fmt.status !== 'supported'">
+                            {{ fmt.status }}
+                          </span>
+                        </td>
+                        <td class="mono subtle">{{ fmt.extensions?.join(', ') }}</td>
+                        <td>{{ fmt.description }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+            <div class="row" style="justify-content: flex-end; margin-top: 16px">
+              <button type="button" class="small" (click)="formatsOpen.set(false)">Close</button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
   `,
 })
@@ -75,6 +137,25 @@ export class ShellLayout {
 
   protected readonly health = signal<Health | null>(null);
   protected readonly dark = signal(document.documentElement.dataset["theme"] !== "light");
+  protected readonly formatsOpen = signal(false);
+  protected readonly formatsLoading = signal(false);
+  protected readonly formatsList = signal<any[]>([]);
+
+  protected openFormats(): void {
+    this.formatsOpen.set(true);
+    if (this.formatsList().length === 0) {
+      this.formatsLoading.set(true);
+      this.api.formats().subscribe({
+        next: (res: any) => {
+          this.formatsList.set(res?.formats ?? []);
+          this.formatsLoading.set(false);
+        },
+        error: () => {
+          this.formatsLoading.set(false);
+        },
+      });
+    }
+  }
 
   constructor() {
     this.applyTheme();

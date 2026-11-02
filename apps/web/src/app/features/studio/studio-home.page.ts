@@ -17,7 +17,7 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
 @Component({
   selector: "hb-studio-home",
   standalone: true,
-  imports: [RouterLink, StatusChip, EmptyState, ErrorPanel, LoadingState, PlannedCard],
+  imports: [RouterLink, StatusChip, EmptyState, ErrorPanel, LoadingState],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page-header">
@@ -166,21 +166,54 @@ import { EmptyState, ErrorPanel, LoadingState, PlannedCard, StatusChip } from ".
       </div>
     }
 
-    <section aria-labelledby="studio-tools-heading" style="margin-top: var(--space-5)">
+    <section aria-labelledby="studio-tools-heading" style="margin-top: 24px">
       <h2 id="studio-tools-heading">Studio tools</h2>
-      <div class="grid cols-2" style="margin-top: var(--space-3)">
-        <hb-planned
-          title="Schema explorer"
-          message="Shipped: the mapping editor embeds source/target schema explorers, and GET /assets/:id/schema serves stored summaries."
-        />
-        <hb-planned
-          title="Validation centre"
-          message="Shipped per-run at validation-centre/:runId. Aggregated issues across runs are still planned."
-        />
-        <hb-planned
-          title="Lineage explorer"
-          message="Shipped as a read-only stored-trace graph at lineage/:runId. Declared per-rule lineage stays planned: traces record record-level events only."
-        />
+      <p class="card-sub">Active development, validation, and debugging utilities.</p>
+      <div class="grid cols-3" style="margin-top: 16px">
+        <div class="card">
+          <h3>Validation Centre</h3>
+          <p class="card-sub" style="margin-top: 8px">
+            Inspect FHIR resource validation, conformance profiles, and multi-level clinical checks per run.
+          </p>
+          <div class="row" style="margin-top: 16px">
+            @if (runs().length > 0) {
+              <a class="button small primary" [routerLink]="['/validation-centre', runs()[0].id]">
+                Latest run ({{ runs()[0].id.slice(0, 8) }}…)
+              </a>
+            }
+            <a class="button small" routerLink="/runs">Browse runs</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Data Lineage</h3>
+          <p class="card-sub" style="margin-top: 8px">
+            Trace source fields to target FHIR resources with execution and provenance graphs.
+          </p>
+          <div class="row" style="margin-top: 16px">
+            @if (runs().length > 0) {
+              <a class="button small primary" [routerLink]="['/lineage', runs()[0].id]">
+                Latest run ({{ runs()[0].id.slice(0, 8) }}…)
+              </a>
+            }
+            <a class="button small" routerLink="/runs">Browse runs</a>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Mapping & Rules Editor</h3>
+          <p class="card-sub" style="margin-top: 8px">
+            Edit schema transformations, inspect schema fields, and preview FHIR mappings live.
+          </p>
+          <div class="row" style="margin-top: 16px">
+            @if (mappings().length > 0) {
+              <a class="button small primary" [routerLink]="['/studio/mappings', mappings()[0].name]">
+                Edit {{ mappings()[0].name }}
+              </a>
+            }
+            <a class="button small" routerLink="/mappings">All mappings</a>
+          </div>
+        </div>
       </div>
     </section>
   `,

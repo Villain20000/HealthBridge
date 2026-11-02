@@ -59,6 +59,9 @@ function isTab(value: string): value is Tab {
             <button type="button" class="small danger" (click)="cancel()" [disabled]="acting()">Cancel run</button>
           }
           <button type="button" class="small" (click)="replay()" [disabled]="acting()">Replay</button>
+          <a class="button small" [routerLink]="['/validation-centre', current.id]">Validation</a>
+          <a class="button small" [routerLink]="['/lineage', current.id]">Lineage</a>
+          <a class="button small" [routerLink]="['/studio/debugger', current.id]">Debugger</a>
         }
         <a class="button small" routerLink="/runs">Back to runs</a>
       </div>
@@ -100,7 +103,11 @@ function isTab(value: string): value is Tab {
           <div class="stat">
             <span class="label">Validation</span>
             <span class="value" style="font-size: 15px">{{ validationLabel(current) }}</span>
-            <span class="hint">{{ issueCount() }} issues loaded</span>
+            <span class="hint">
+              <a [routerLink]="['/validation-centre', current.id]" style="color: inherit; text-decoration: underline">
+                {{ issueCount() }} issues (Centre →)
+              </a>
+            </span>
           </div>
         </div>
       </div>
@@ -287,7 +294,11 @@ function isTab(value: string): value is Tab {
               @if (payload.traces.length === 0) {
                 <hb-empty title="No traces stored" message="This run produced no trace events." />
               } @else {
-                <p class="card-sub">{{ payload.count }} events · redacted payloads per ADR-0002/0003</p>
+                <p class="card-sub">
+                  {{ payload.count }} events · redacted payloads per ADR-0002/0003 ·
+                  <a [routerLink]="['/studio/debugger', current.id]">Open in Debugger →</a> ·
+                  <a [routerLink]="['/lineage', current.id]">View Lineage →</a>
+                </p>
                 <div class="table-wrap">
                   <table>
                     <thead>
