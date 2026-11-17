@@ -10,6 +10,20 @@ import {
 import { MedicalFormatAdapter, computeChecksum, createCanonicalEnvelope } from "@healthbridge/core";
 import { FhirNdjsonFormatAdapter } from "@healthbridge/fhir-ndjson";
 import { buildCsvRecords, decodeBuffer, readCsvTable } from "./csv.js";
+import { CdiscOdmFormatAdapter } from "./cdisc-odm.js";
+import { DicomFormatAdapter } from "./dicom.js";
+import { DicomWebAdapter } from "./dicomweb.js";
+import { EdfWfdbFormatAdapter } from "./edf.js";
+import { FastaFastqFormatAdapter } from "./fasta.js";
+import { FhirRestFormatAdapter } from "./fhir-rest.js";
+import { FhirValidatorFormatAdapter } from "./fhir-validator.js";
+import { Hl7v2FormatAdapter } from "./hl7v2.js";
+import { MySqlSourceConnectorAdapter } from "./mysql-connector.js";
+import { OmopFormatAdapter } from "./omop.js";
+import { PdfFormatAdapter } from "./pdf.js";
+import { VcfFormatAdapter } from "./vcf.js";
+import { XlsxFormatAdapter } from "./xlsx.js";
+import { XmlCdaFormatAdapter } from "./xml-cda.js";
 
 export * from "./csv.js";
 export * from "./kit.js";
@@ -509,4 +523,83 @@ export class FhirJsonFormatAdapter implements MedicalFormatAdapter {
 /** Built-in adapter bundle used by the engine, SDK, CLI and API. */
 export function createBuiltInAdapters(): MedicalFormatAdapter[] {
   return [new CsvFormatAdapter(), new JsonFormatAdapter(), new FhirJsonFormatAdapter(), new FhirNdjsonFormatAdapter()];
+}
+
+const OPT_IN_ADAPTER_FACTORIES: Record<string, () => MedicalFormatAdapter> = {
+  hl7v2: () => new Hl7v2FormatAdapter(),
+  "xml-cda": () => new XmlCdaFormatAdapter(),
+  cda: () => new XmlCdaFormatAdapter(),
+  xlsx: () => new XlsxFormatAdapter(),
+  dicom: () => new DicomFormatAdapter(),
+  dicomweb: () => new DicomWebAdapter(),
+  "fhir-rest": () => new FhirRestFormatAdapter(),
+  omop: () => new OmopFormatAdapter(),
+  vcf: () => new VcfFormatAdapter(),
+  fasta: () => new FastaFastqFormatAdapter(),
+  fastq: () => new FastaFastqFormatAdapter(),
+  pdf: () => new PdfFormatAdapter(),
+  edf: () => new EdfWfdbFormatAdapter(),
+  wfdb: () => new EdfWfdbFormatAdapter(),
+  "cdisc-odm": () => new CdiscOdmFormatAdapter(),
+  "mysql-connector": () => new MySqlSourceConnectorAdapter(),
+  mysql: () => new MySqlSourceConnectorAdapter(),
+  "fhir-validator": () => new FhirValidatorFormatAdapter(),
+};
+
+const CANONICAL_OPT_IN_IDS = [
+  "hl7v2",
+  "xml-cda",
+  "xlsx",
+  "dicom",
+  "dicomweb",
+  "fhir-rest",
+  "omop",
+  "vcf",
+  "fasta",
+  "pdf",
+  "edf",
+  "cdisc-odm",
+  "mysql-connector",
+  "fhir-validator",
+];
+
+/** Returns the canonical ids of all opt-in adapters that can be enabled explicitly. */
+export function listOptInAdapterIds(): string[] {
+  return [...CANONICAL_OPT_IN_IDS];
+}
+
+/** Instantiates a single opt-in adapter by id/alias, or returns undefined if unknown. */
+export function createOptInAdapter(idOrAlias: string): MedicalFormatAdapter | undefined {
+  const key = idOrAlias.trim().toLowerCase();
+  const factory = OPT_IN_ADAPTER_FACTORIES[key];
+  return factory ? factory() : undefined;
+}
+
+/**
+ * Returns the built-in adapters plus any opt-in adapters explicitly listed in
+ * `HEALTHBRIDGE_ENABLE_ADAPTERS` (comma-separated). Privileged/network adapters
+ * are never auto-loaded unless named explicitly.
+ */
+export function createConfiguredAdapters(env: NodeJS.ProcessEnv = process.env): MedicalFormatAdapter[] {
+  const adapters = createBuiltInAdapters();
+  const raw = env.HEALTHBRIDGE_ENABLE_ADAPTERS?.trim();
+  if (!raw) return adapters;
+
+  const seenIds = new Set(adapters.map((a) => a.id));
+  for (const token of raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)) {
+    const adapter = createOptInAdapter(token);
+    if (!adapter) {
+      throw new Error(
+        `Unknown opt-in adapter '${token}' in HEALTHBRIDGE_ENABLE_ADAPTERS. Valid values: ${CANONICAL_OPT_IN_IDS.join(", ")}`,
+      );
+    }
+    if (!seenIds.has(adapter.id)) {
+      seenIds.add(adapter.id);
+      adapters.push(adapter);
+    }
+  }
+  return adapters;
 }

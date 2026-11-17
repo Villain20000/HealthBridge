@@ -2248,6 +2248,755 @@
         ]
       }
     },
+    "/api/v1/mappings/preview": {
+      "post": {
+        "operationId": "MappingStudioController.preview",
+        "summary": "Preview a mapping spec against an asset",
+        "description": "Runs a bounded, read-only preview of a mapping specification against a stored asset without creating a run or persisting outputs.\n\nRequires scope `mappings:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded preview result with generated resources, issues, and coverage.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:write",
+        "parameters": [
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Preview request payload.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "spec",
+                  "assetId"
+                ],
+                "properties": {
+                  "spec": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "assetId": {
+                    "type": "string"
+                  },
+                  "maxRecords": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "adapterId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mappings/{name}/draft": {
+      "get": {
+        "operationId": "MappingStudioController.getDraft",
+        "summary": "Get the current mapping draft",
+        "description": "Returns the active draft for the named mapping catalogue entry.\n\nRequires scope `mappings:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The active mapping draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:read",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Mapping name (slug). Versions share the name; runs reference immutable ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "MappingStudioController.saveDraft",
+        "summary": "Save a mapping draft",
+        "description": "Creates or updates a mapping draft with optimistic revision checking.\n\nRequires scope `mappings:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The saved mapping draft.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:write",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Mapping name (slug). Versions share the name; runs reference immutable ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Draft spec and expected revision.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "spec",
+                  "revision"
+                ],
+                "properties": {
+                  "spec": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "baseVersion": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "MappingStudioController.discardDraft",
+        "summary": "Discard a mapping draft",
+        "description": "Discards the active draft for the named mapping, optionally checking the expected revision.\n\nRequires scope `mappings:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Draft discarded.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:write",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Mapping name (slug). Versions share the name; runs reference immutable ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "revision",
+            "in": "query",
+            "required": false,
+            "description": "Optional expected draft revision.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/mappings/{name}/publish": {
+      "post": {
+        "operationId": "MappingStudioController.publish",
+        "summary": "Publish a mapping draft",
+        "description": "Publishes the active draft as the next immutable mapping version.\n\nRequires scope `mappings:write`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The newly published immutable mapping version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mapping": {
+                      "$ref": "#/components/schemas/Mapping"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Failure envelope with one of: `CONFLICT` (409).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:write",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Mapping name (slug). Versions share the name; runs reference immutable ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Expected draft revision.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "revision"
+                ],
+                "properties": {
+                  "revision": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mappings/{name}/diff": {
+      "get": {
+        "operationId": "MappingStudioController.diff",
+        "summary": "Diff two mapping versions or a draft",
+        "description": "Computes a structural diff between two versions (or the active draft) of a named mapping.\n\nRequires scope `mappings:read`. A key without it gets 403 `FORBIDDEN`.",
+        "tags": [
+          "Mappings"
+        ],
+        "security": [
+          {
+            "ApiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Structural mapping diff.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Failure envelope with one of: `VALIDATION_FAILED` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Failure envelope with one of: `UNAUTHENTICATED` (401), `REVOKED_KEY` (401), `EXPIRED_KEY` (401), `MALFORMED_KEY` (400).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Failure envelope with one of: `FORBIDDEN` (403).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Failure envelope with one of: `NOT_FOUND` (404).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Failure envelope with one of: `RATE_LIMITED` (429).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Failure envelope with one of: `INTERNAL` (500).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "x-required-scope": "mappings:read",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "Mapping name (slug). Versions share the name; runs reference immutable ids.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "description": "Source version number or 'draft'.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "description": "Target version number or 'draft'.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": true,
+            "description": "API key (`hb_…`). Tenant isolation comes from the key, never the URL.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/v1/pipelines": {
       "post": {
         "operationId": "PipelinesController.create",

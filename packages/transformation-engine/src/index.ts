@@ -13,7 +13,7 @@ import {
   ValidationReport,
 } from "@healthbridge/shared-types";
 import { AdapterRegistry, MedicalFormatAdapter, computeChecksum } from "@healthbridge/core";
-import { createBuiltInAdapters } from "@healthbridge/adapters";
+import { createConfiguredAdapters } from "@healthbridge/adapters";
 import {
   MappingDefinition,
   MappingEngine,
@@ -203,7 +203,7 @@ export class TransformationPipeline {
 
   constructor(adapters?: MedicalFormatAdapter[], builders: TargetBuilderRegistry = defaultTargetBuilderRegistry) {
     this.registry = new AdapterRegistry();
-    for (const adapter of adapters ?? createBuiltInAdapters()) {
+    for (const adapter of adapters ?? createConfiguredAdapters()) {
       this.registry.register(adapter);
     }
     this.mappingEngine = new MappingEngine();
@@ -1362,8 +1362,7 @@ export class TransformationPipeline {
     const inputChecksum = computeChecksum(options.input);
     const runImportedAt = options.importedAt ?? new Date(startTime).toISOString();
     const parseIssues: ValidationIssue[] = [];
-    const chunkSize =
-      options.chunkSize !== undefined && options.chunkSize > 0 ? Math.floor(options.chunkSize) : 100;
+    const chunkSize = options.chunkSize !== undefined && options.chunkSize > 0 ? Math.floor(options.chunkSize) : 100;
     const signal = options.signal;
     const shouldPause = options.shouldPause ?? (() => false);
 
@@ -1398,7 +1397,9 @@ export class TransformationPipeline {
 
     if (options.resumeFrom) {
       if (options.resumeFrom.inputChecksum !== undefined && options.resumeFrom.inputChecksum !== inputChecksum) {
-        throw new Error("executeChunked: checkpoint inputChecksum does not match the supplied input; refusing to resume.");
+        throw new Error(
+          "executeChunked: checkpoint inputChecksum does not match the supplied input; refusing to resume.",
+        );
       }
       if (options.resumeFrom.importedAt !== runImportedAt) {
         throw new Error("executeChunked: resume must reuse the checkpoint importedAt for byte-identical output.");
@@ -1801,7 +1802,9 @@ export class TransformationPipeline {
           }
         }
 
-        const blocking: ValidationIssue[] = recordIssues.filter((i) => i.severity === "fatal" || i.severity === "error");
+        const blocking: ValidationIssue[] = recordIssues.filter(
+          (i) => i.severity === "fatal" || i.severity === "error",
+        );
         if (build?.rejected && blocking.length === 0) {
           blocking.push({
             code: "TARGET_BUILD_REJECTED",

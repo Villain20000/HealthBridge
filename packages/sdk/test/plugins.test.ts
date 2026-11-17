@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { CsvFormatAdapter } from "@healthbridge/adapters";
+import { CsvFormatAdapter, createConfiguredAdapters } from "@healthbridge/adapters";
 import { AdapterRegistry, type MedicalFormatAdapter } from "@healthbridge/core";
 import type {
   CapabilityManifest,
@@ -9,6 +9,7 @@ import type {
   MedicalDataEnvelope,
   ParseContext,
 } from "@healthbridge/shared-types";
+import { HealthBridge } from "../src/index.js";
 import {
   BUILT_IN_ADAPTER_IDS,
   PluginError,
@@ -194,5 +195,31 @@ describe("plugin manifest gating", () => {
       assert.fail("stub must yield no records");
     }
     assert.equal(touched, false);
+  });
+
+  test("HealthBridge.registerAdapter enforces manifest verification for third-party adapters", () => {
+    const sdk = new HealthBridge();
+    const stub = new StubAdapter();
+    assert.throws(
+      () => sdk.registerAdapter(stub),
+      (error: unknown) => error instanceof PluginError && error.code === "PLUGIN_UNSIGNED",
+    );
+    sdk.registerAdapter(stub, signed(stub));
+    assert.ok(sdk.listAdapters().some((a) => a.id === stub.id));
+  });
+
+  test("createConfiguredAdapters loads opt-in adapters only when explicitly enabled", () => {
+    const defaults = createConfiguredAdapters({} as NodeJS.ProcessEnv);
+    assert.equal(defaults.length, 4);
+
+    const enabled = createConfiguredAdapters({ HEALTHBRIDGE_ENABLE_ADAPTERS: "hl7v2,xlsx" } as NodeJS.ProcessEnv);
+    assert.equal(enabled.length, 6);
+    assert.ok(enabled.some((a) => a.getManifest().format === "hl7v2"));
+    assert.ok(enabled.some((a) => a.getManifest().format === "xlsx"));
+
+    assert.throws(
+      () => createConfiguredAdapters({ HEALTHBRIDGE_ENABLE_ADAPTERS: "nonexistent-adapter" } as NodeJS.ProcessEnv),
+      /Unknown opt-in adapter/,
+    );
   });
 });

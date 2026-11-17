@@ -4,6 +4,7 @@ import { AssetsController } from "./controllers/assets.controller.js";
 import { AuditController } from "./controllers/audit.controller.js";
 import { HealthController } from "./controllers/health.controller.js";
 import { KeysController } from "./controllers/keys.controller.js";
+import { MappingStudioController } from "./controllers/mapping-studio.controller.js";
 import { MappingsController } from "./controllers/mappings.controller.js";
 import { PipelinesController } from "./controllers/pipelines.controller.js";
 import { RunsController } from "./controllers/runs.controller.js";
@@ -39,6 +40,7 @@ const CONTROLLERS: ControllerClass[] = [
   KeysController,
   AssetsController,
   MappingsController,
+  MappingStudioController,
   PipelinesController,
   RunsController,
   AuditController,
@@ -47,6 +49,7 @@ const CONTROLLERS: ControllerClass[] = [
 const METHOD_NAMES: Record<number, string> = {
   [RequestMethod.GET]: "get",
   [RequestMethod.POST]: "post",
+  [RequestMethod.PUT]: "put",
   [RequestMethod.DELETE]: "delete",
 };
 
@@ -843,6 +846,104 @@ export const ROUTE_DOCS: Record<string, RouteDoc> = {
     successDescription: "The mapping version.",
     successSchema: { type: "object", properties: { mapping: { $ref: "#/components/schemas/Mapping" } } },
     errors: ["NOT_FOUND"],
+  },
+  "POST /api/v1/mappings/preview": {
+    summary: "Preview a mapping spec against an asset",
+    description:
+      "Runs a bounded, read-only preview of a mapping specification against a stored asset without creating a run or persisting outputs.",
+    tags: ["Mappings"],
+    scope: "mappings:write",
+    requestBody: {
+      description: "Preview request payload.",
+      required: true,
+      schema: {
+        type: "object",
+        required: ["spec", "assetId"],
+        properties: {
+          spec: { type: "object", additionalProperties: true },
+          assetId: { type: "string" },
+          maxRecords: { type: "integer", minimum: 1 },
+          adapterId: { type: "string" },
+        },
+      },
+    },
+    successDescription: "Bounded preview result with generated resources, issues, and coverage.",
+    successSchema: { type: "object", additionalProperties: true },
+    errors: ["VALIDATION_FAILED", "NOT_FOUND"],
+  },
+  "GET /api/v1/mappings/:name/draft": {
+    summary: "Get the current mapping draft",
+    description: "Returns the active draft for the named mapping catalogue entry.",
+    tags: ["Mappings"],
+    scope: "mappings:read",
+    successDescription: "The active mapping draft.",
+    successSchema: { type: "object", additionalProperties: true },
+    errors: ["NOT_FOUND"],
+  },
+  "PUT /api/v1/mappings/:name/draft": {
+    summary: "Save a mapping draft",
+    description: "Creates or updates a mapping draft with optimistic revision checking.",
+    tags: ["Mappings"],
+    scope: "mappings:write",
+    requestBody: {
+      description: "Draft spec and expected revision.",
+      required: true,
+      schema: {
+        type: "object",
+        required: ["spec", "revision"],
+        properties: {
+          spec: { type: "object", additionalProperties: true },
+          revision: { type: "integer", minimum: 0 },
+          baseVersion: { type: "integer", minimum: 1 },
+        },
+      },
+    },
+    successDescription: "The saved mapping draft.",
+    successSchema: { type: "object", additionalProperties: true },
+    errors: ["VALIDATION_FAILED", "CONFLICT"],
+  },
+  "DELETE /api/v1/mappings/:name/draft": {
+    summary: "Discard a mapping draft",
+    description: "Discards the active draft for the named mapping, optionally checking the expected revision.",
+    tags: ["Mappings"],
+    scope: "mappings:write",
+    query: [{ name: "revision", description: "Optional expected draft revision.", schema: { type: "integer" } }],
+    successDescription: "Draft discarded.",
+    successSchema: {},
+    errors: ["NOT_FOUND", "CONFLICT"],
+  },
+  "POST /api/v1/mappings/:name/publish": {
+    summary: "Publish a mapping draft",
+    description: "Publishes the active draft as the next immutable mapping version.",
+    tags: ["Mappings"],
+    scope: "mappings:write",
+    requestBody: {
+      description: "Expected draft revision.",
+      required: true,
+      schema: {
+        type: "object",
+        required: ["revision"],
+        properties: {
+          revision: { type: "integer", minimum: 0 },
+        },
+      },
+    },
+    successDescription: "The newly published immutable mapping version.",
+    successSchema: { type: "object", properties: { mapping: { $ref: "#/components/schemas/Mapping" } } },
+    errors: ["VALIDATION_FAILED", "NOT_FOUND", "CONFLICT"],
+  },
+  "GET /api/v1/mappings/:name/diff": {
+    summary: "Diff two mapping versions or a draft",
+    description: "Computes a structural diff between two versions (or the active draft) of a named mapping.",
+    tags: ["Mappings"],
+    scope: "mappings:read",
+    query: [
+      { name: "from", description: "Source version number or 'draft'." },
+      { name: "to", description: "Target version number or 'draft'." },
+    ],
+    successDescription: "Structural mapping diff.",
+    successSchema: { type: "object", additionalProperties: true },
+    errors: ["NOT_FOUND", "VALIDATION_FAILED"],
   },
   "POST /api/v1/pipelines": {
     summary: "Create a pipeline",

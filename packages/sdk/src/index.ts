@@ -14,6 +14,7 @@ import { MappingDefinition } from "@healthbridge/mapping-engine";
 import { FhirValidator } from "@healthbridge/validation";
 import { exportTraceReport } from "@healthbridge/trace-protocol";
 import { ENGINE_VERSION, RunBundle, TRACE_PROTOCOL_VERSION, TraceEvent } from "@healthbridge/shared-types";
+import { PluginManifest, registerPluginAdapter } from "./plugins.js";
 
 export type InputSource = InputDescriptor | string;
 
@@ -99,8 +100,8 @@ export class HealthBridge {
     this.fhirValidator = new FhirValidator();
   }
 
-  public registerAdapter(adapter: MedicalFormatAdapter): void {
-    this.pipeline.getRegistry().register(adapter);
+  public registerAdapter(adapter: MedicalFormatAdapter, manifest?: PluginManifest): void {
+    registerPluginAdapter(this.pipeline.getRegistry(), adapter, manifest);
   }
 
   public listFormats(): CapabilityManifest[] {

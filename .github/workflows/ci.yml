@@ -126,6 +126,13 @@ jobs:
       - name: Console unit tests (SSE parser, error mapping, proxy contract)
         run: npm run test:web
 
+      - name: Console component-DOM unit tests (Vitest)
+        run: npm run test:unit
+
+      - name: Docs site builds deterministically
+        shell: bash
+        run: npm run docs:site -- --out /tmp/docs-site-ci && test -s /tmp/docs-site-ci/index.html
+
       - name: The browser bundle must not import Node-only modules (B5)
         shell: bash
         run: |

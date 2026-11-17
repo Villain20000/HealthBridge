@@ -428,6 +428,45 @@ export class HealthBridgeClient {
     return this.request("GET", `/mappings/${encodeURIComponent(name)}/versions`);
   }
 
+  public previewMapping(input: {
+    spec: Record<string, unknown>;
+    assetId: string;
+    maxRecords?: number;
+    adapterId?: string;
+  }): Promise<Record<string, unknown>> {
+    return this.request("POST", "/mappings/preview", { body: input });
+  }
+
+  public getMappingDraft(name: string): Promise<Record<string, unknown>> {
+    return this.request("GET", `/mappings/${encodeURIComponent(name)}/draft`);
+  }
+
+  public saveMappingDraft(
+    name: string,
+    input: { spec: Record<string, unknown>; revision: number; baseVersion?: number },
+  ): Promise<Record<string, unknown>> {
+    return this.request("PUT", `/mappings/${encodeURIComponent(name)}/draft`, { body: input });
+  }
+
+  public discardMappingDraft(name: string, revision?: number): Promise<void> {
+    return this.request("DELETE", `/mappings/${encodeURIComponent(name)}/draft`, {
+      query: revision !== undefined ? { revision } : undefined,
+    });
+  }
+
+  public async publishMapping(name: string, revision: number): Promise<Mapping> {
+    const response = await this.request<{ mapping: Mapping }>("POST", `/mappings/${encodeURIComponent(name)}/publish`, {
+      body: { revision },
+    });
+    return response.mapping;
+  }
+
+  public diffMapping(name: string, options: { from?: string; to?: string } = {}): Promise<Record<string, unknown>> {
+    return this.request("GET", `/mappings/${encodeURIComponent(name)}/diff`, {
+      query: { from: options.from, to: options.to },
+    });
+  }
+
   // ---- pipelines ----
 
   public async createPipeline(input: {
@@ -493,6 +532,20 @@ export class HealthBridgeClient {
 
   public async cancelRun(id: string): Promise<Run> {
     const response = await this.request<{ run: Run }>("POST", `/runs/${encodeURIComponent(id)}/cancel`, {
+      body: {},
+    });
+    return response.run;
+  }
+
+  public async pauseRun(id: string): Promise<Run> {
+    const response = await this.request<{ run: Run }>("POST", `/runs/${encodeURIComponent(id)}/pause`, {
+      body: {},
+    });
+    return response.run;
+  }
+
+  public async resumeRun(id: string): Promise<Run> {
+    const response = await this.request<{ run: Run }>("POST", `/runs/${encodeURIComponent(id)}/resume`, {
       body: {},
     });
     return response.run;
